@@ -25,7 +25,7 @@ export function buildManifoldCadScript({ sources, genome, printLengthMm = 150 })
   const genomeJson = JSON.stringify(genome, (k, v) => (typeof v === 'number' ? Math.round(v * 1e5) / 1e5 : v), 2);
   const body = SOURCE_FILES.map((f) => `// ${'='.repeat(70)}\n// src/${f}\n// ${'='.repeat(70)}\n${strip(sources[f])}`).join('\n\n');
   return `// ${name} — ManifoldCAD script exported from Starship Drydock
-// https://github.com/SoulFireMage/starship-builder-
+// https://github.com/SoulFireMage/starship-builder
 //
 // Paste into https://manifoldcad.org, or run:  npx manifold-cad ship.mjs ship.3mf
 //

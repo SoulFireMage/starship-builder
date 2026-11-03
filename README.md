@@ -61,7 +61,7 @@ telemetry, the `window.drydock` browser API, and the rules for extending it.
 Settings → Pages → **Build and deployment: Deploy from a branch** → `main` /
 `(root)`. No build step or Actions workflow is needed. `.nojekyll` stops Jekyll
 from touching the files. The site will be at
-`https://<user>.github.io/starship-builder-/`, ready to link or iframe from a
+`https://<user>.github.io/starship-builder/`, ready to link or iframe from a
 blog. three.js and manifold-3d load from jsDelivr at pinned versions.
 
 ## Layout
