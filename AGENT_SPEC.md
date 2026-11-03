@@ -56,7 +56,7 @@ inlines it).
 | 1. Parts | Hull: 72 rings sampled from **monotone cubic** splines through the stations, skinned by `loft()` → `Manifold.ofMesh` (validated). Wings: airfoil rings along the span with sweep, crescent, gull, dihedral and rounded tips. Nacelles: radius-profile lofts plus a pylon `hull()`. Main engines: bells on the stern | Monotone splines never overshoot, so widths can't go negative and hulls can't bulge past their stations |
 | 2. Union + exterior details | `Manifold.union(parts)`, then subtract nozzles and intakes | Exterior details may be carved before the warp |
 | 3. **Refine, then warp** | `refineToLength(edge)` → `warpBatch(W)` → `simplify(tol)` | **A warp only moves existing vertices.** Without refining first, ribs and terraces alias away: the v1 demo's rib warp was sampled at 6 points along the ship |
-| 4. Bridge + cavity | Ray-cast the **warped** dorsal surface at every canopy station; build the canopy, glass shell, frames and room on that measured surface. The room's roof respects the section's curvature at its edges | Warp the exterior; carve Euclidean interiors. Decks are dead level. Never warp a cavity |
+| 4. Bridge + cavity | Ray-cast the **warped** dorsal *and ventral* surfaces at every canopy station (ignoring hits on fins or wings above the hull); fit each canopy ring so its buried half stays above the belly and inside the side walls; keep the canopy between stern and bow tip. Build the glass shell, frames and room on that measured surface. The room's roof respects the section's curvature at its edges | Warp the exterior; carve Euclidean interiors. Decks are dead level. Never warp a cavity |
 | 5. Clean + telemetry | `decompose()`; drop numerical debris (thin, near-zero-volume slivers); keep sealed voids; compute telemetry | Report components honestly: a real floating part is a `DISCONNECTED` warning |
 | 6. Free | `Scope.free()` in a `finally` | See §6 |
 
@@ -132,7 +132,8 @@ to the hull.
 | `proportions` | `beamToLength`, `heightToLength`, `planformFill` (top-view area ÷ bounding rectangle, via `project()`) |
 | `bridge.forwardSightlineClearPct` | A 7×5 ray fan (`rayCast`) from the pilot's eye, cast against the ship *without* canopy frames: does the bow or spine block the horizon? |
 | `bridge.deckHeadroomM`, `habitableVolumeM3`, `pilotEyeXYZ` | Interior checks |
-| `warnings[]` | `DISCONNECTED`, `BOW_OCCLUSION` (< 75% clear), `BRIDGE_CRAMPED` (< 1.95 m) |
+| `bridge.canopyBreachRays` | Probe rays (from below and both sides) that hit canopy glass before hull. Must be 0 |
+| `warnings[]` | `DISCONNECTED`, `CANOPY_BREACH`, `BOW_OCCLUSION` (< 75% clear), `BRIDGE_CRAMPED` (< 1.95 m) |
 | `timingsMs` | Per-stage build cost |
 
 ## 6. WASM hygiene (critical)
@@ -163,7 +164,7 @@ node tools/ui-test.mjs                        # browser UI regression test (need
 node tools/compile.mjs katiya                 # telemetry JSON for a preset or a genome file
 node tools/compile.mjs ship.json --cutaway
 node tools/snapshot.mjs katiya my.json        # PNGs in snapshots/ + telemetry (needs Playwright)
-node tools/snapshot.mjs my.json --cockpit     # the pilot's view
+node tools/snapshot.mjs my.json --view below  # side|below|front|rear|top|cockpit
 node tools/manifoldcad.mjs katiya --mm 200   # self-contained ManifoldCAD script (real compiler source + genome)
 node tools/serve.mjs 8080                     # local server (modules need http://)
 ```
@@ -174,7 +175,7 @@ return a promise of the telemetry. Also:
 - `compile(genome)` evaluates a genome without displaying it;
 - `snapshot()` returns a PNG data URL;
 - `manifoldCadScript()` returns the ManifoldCAD script for the current ship;
-- `view('orbit' | 'cockpit')` switches the camera;
+- `view(name)` switches the camera: `orbit`, `cockpit`, or a fixed angle `side`, `below`, `front`, `rear`, `top` (also `tools/snapshot.mjs --view below`);
 - `genome`, `telemetry`, `presets` and `GENES` are readable properties.
 
 A sensible agent loop:

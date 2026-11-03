@@ -182,7 +182,7 @@ export class Viewport {
     if (this.mode === 'cockpit') this.cockpit();
   }
 
-  frame() {
+  frame(dir = this.viewDir || [0.72, 0.52, 0.42]) {
     if (!this.group) return;
     const box = new THREE.Box3().setFromObject(this.group.children[0]);
     const c = box.getCenter(new THREE.Vector3()), R = box.getSize(new THREE.Vector3()).length() / 2;
@@ -190,7 +190,7 @@ export class Viewport {
     // fit whichever field of view is narrower (portrait phones are width-limited)
     const vf = (this.camera.fov * Math.PI) / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * this.camera.aspect);
     const d = R / Math.sin(Math.min(vf, hf) / 2) * 0.95;
-    this.camera.position.copy(c).add(new THREE.Vector3(0.72, 0.52, 0.42).normalize().multiplyScalar(d));
+    this.camera.position.copy(c).add(new THREE.Vector3(...dir).normalize().multiplyScalar(d));
     this.camera.near = Math.max(0.05, R / 500);
     this.camera.updateProjectionMatrix();
   }
@@ -213,6 +213,17 @@ export class Viewport {
     this.camera.position.copy(eye);
     this.camera.near = 0.03; this.camera.fov = 70;
     this.camera.updateProjectionMatrix();
+  }
+
+  /** Named camera angles for inspecting a ship (also used by agents). */
+  angle(name) {
+    const dirs = {
+      default: [0.72, 0.52, 0.42], side: [1, 0.0001, 0.05], below: [0.55, 0.35, -0.75],
+      front: [0.15, 1, 0.2], rear: [0.25, -1, 0.3], top: [0.0001, 0.0001, 1],
+    };
+    this.viewDir = dirs[name] || dirs.default;
+    if (this.mode !== 'orbit') this.orbit(); else this.frame();
+    this.setAutoRotate(false);
   }
 
   setAutoRotate(on) { this.autoRotate = on; if (this.mode === 'orbit') this.controls.autoRotate = on; }

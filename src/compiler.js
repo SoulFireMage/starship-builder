@@ -255,17 +255,34 @@ export function compileStarship(wasm, genomeIn, opts = {}) {
     const hb = hullAt(b.t);
     const yC = hb.y;
     const spineW = (y) => W([0, y, hullAt(tOfY(y)).zc])[2];
-    const topCache = new Map();
-    const topW = (y) => {
-      const key = Math.round(y * 1000);
-      if (topCache.has(key)) return topCache.get(key);
+    // ray from spine height at (x, y) straight up (dir=+1) or down (dir=-1);
+    // returns the z of the first surface hit, or null
+    const rayCache = new Map();
+    const surfZ = (x, y, dir) => {
+      const key = `${Math.round(x * 1000)}|${Math.round(y * 1000)}|${dir}`;
+      if (rayCache.has(key)) return rayCache.get(key);
       const z0 = spineW(y);
-      const hits = typeof ext.rayCast === 'function' ? ext.rayCast([0, y, z0], [0, y, z0 + L]) : [];
-      const z = hits.length ? hits[0].position[2] : W([0, y, hullTopZ(y)])[2];
-      topCache.set(key, z);
+      const hits = typeof ext.rayCast === 'function' ? ext.rayCast([x, y, z0], [x, y, z0 + dir * L]) : [];
+      const z = hits.length ? hits[0].position[2] : null;
+      rayCache.set(key, z);
       return z;
     };
-    const cL = clamp(b.size * L * 0.12, 2.5, L * 0.28);
+    // where the hull's own dorsal surface should be at (x, y), from the genome;
+    // used to reject ray hits on fins or wings standing above the hull
+    const predictedTop = (x, y) => {
+      const h = hullAt(tOfY(y)), hwEff = Math.max(0.01, h.hw * (1 - g.hull.tumble * 0.5));
+      const f = Math.pow(Math.max(0, 1 - Math.pow(Math.min(1, Math.abs(x) / hwEff), h.n)), 1 / h.n);
+      return W([x, y, h.zc + h.top * f])[2];
+    };
+    const tol = (y) => 0.3 * hullAt(tOfY(y)).top + stepH * st.terrace + ribA + 0.25;
+    const bodyTop = (x, y) => {
+      const z = surfZ(x, y, 1), pz = predictedTop(x, y);
+      return z === null || z > pz + tol(y) ? (z === null ? null : pz) : z;
+    };
+    const topW = (y) => bodyTop(0, y) ?? predictedTop(0, y);
+    const botW = (y) => { const h = hullAt(tOfY(y)); return surfZ(0, y, -1) ?? W([0, y, h.zc - h.bot])[2]; };
+    // the canopy must end before the bow tip and after the stern face
+    const cL = Math.min(clamp(b.size * L * 0.12, 2.5, L * 0.28), 2 * Math.max(1.5, Math.min(halfL - yC, yC + halfL) - 0.04 * L));
     const cW = Math.max(1.0, Math.min(hb.hw * 2 * 0.62, cL * 0.48));
     const wall = Math.max(0.1, cW * 0.035);
     // Cockpits are human-scale whatever the ship's size: grow the canopy until
@@ -278,18 +295,38 @@ export function compileStarship(wasm, genomeIn, opts = {}) {
     }
     const embed = cH * 0.3 + (st.terrace > 0 ? stepH * 0.5 : 0) + ribA;
     const prof = (u) => Math.pow(Math.sin(Math.PI * Math.pow(u, 1.45)), 0.62);
+    // The canopy's lower half is buried in the hull. Fit it to the *measured*
+    // hull at every station so it can never poke out of the belly or the
+    // sides — a human-scale canopy on a small ship is deeper than the hull.
+    const fitCache = new Map();
+    const fit = (u) => {
+      if (fitCache.has(u)) return fitCache.get(u);
+      const p = prof(u), y = yC - cL / 2 + u * cL;
+      const top = topW(y), bot = botW(y), depth = Math.max(0.2, top - bot);
+      const emb = Math.min(embed, depth * 0.35);
+      const base = top - emb;
+      const margin = Math.max(2 * wall, 0.12, depth * 0.1);
+      const below = Math.max(0.05, Math.min(cH * 0.6 + emb, base - bot - margin));   // stay above the belly
+      const local = hullAt(tOfY(y));
+      let hw = Math.max(0.05, Math.min((cW / 2) * p, local.hw * 0.62));
+      for (let j = 0; j < 10; j++) {                         // stay inside the side walls at the rim
+        const side = bodyTop(hw, y);
+        if (side !== null && side >= base + Math.min(0.1, emb * 0.5)) break;
+        hw *= 0.85;
+      }
+      const f = { y, p, base, below, hw: Math.max(0.03, hw), up: cH + emb };
+      fitCache.set(u, f);
+      return f;
+    };
     const canopyRings = (shrink) => {
       const rings = [];
       for (let i = 1; i < 30; i++) {
-        const u = i / 30, p = prof(u), y = yC - cL / 2 + u * cL;
-        const base = topW(y) - embed;
-        const local = hullAt(tOfY(y));                          // hug the hull where it narrows
-        const hwMax = Math.max(0.05, local.hw * 0.62);
-        rings.push(superRing({ y, zc: base, hw: Math.max(0.01, Math.min((cW / 2) * p, hwMax) - shrink), top: Math.max(0.01, (cH + embed) * p - shrink), bot: Math.max(0.01, cH * 0.6 + embed - shrink), n: 2.3, segments: 40 }));
+        const f = fit(i / 30);
+        rings.push(superRing({ y: f.y, zc: f.base, hw: Math.max(0.01, f.hw - shrink), top: Math.max(0.01, f.up * f.p - shrink), bot: Math.max(0.01, f.below - shrink), n: 2.3, segments: 40 }));
       }
       return rings;
     };
-    const apex = (u) => { const y = yC - cL / 2 + u * cL; return [0, y, topW(y) - embed]; };
+    const apex = (u) => { const y = yC - cL / 2 + u * cL; return [0, y, topW(y) - Math.min(embed, Math.max(0.2, topW(y) - botW(y)) * 0.35)]; };
 
     const outer = k(loft(wasm, canopyRings(0), { startApex: apex(0), endApex: apex(1) }));
     const inner0 = k(loft(wasm, canopyRings(wall), { startApex: apex(0.04), endApex: apex(0.96) }));
@@ -393,6 +430,29 @@ export function compileStarship(wasm, genomeIn, opts = {}) {
     const clearPct = Math.round((1000 * clear) / total) / 10;
     if (clearPct < 75) warnings.push(`BOW_OCCLUSION: only ${clearPct}% of the forward sight-fan is clear`);
 
+    // canopy breach: seen from below or from either side, the hull must hide
+    // the canopy's buried half — the glass must never be the first thing hit
+    let breaches = 0;
+    if (!glass.isEmpty() && typeof glass.rayCast === 'function') {
+      const firstHit = (m, a, bpt) => { const h = m.rayCast(a, bpt); return h.length ? h[0].distance : Infinity; };
+      for (const u of [0.2, 0.35, 0.5, 0.65, 0.8]) {
+        const f = fit(u);
+        const zLow = f.base - f.below * 0.6;
+        const rays = [
+          [[0, f.y, f.base - L], [0, f.y, f.base]],
+          [[f.hw * 0.6, f.y, f.base - L], [f.hw * 0.6, f.y, f.base]],
+          [[-f.hw * 0.6, f.y, f.base - L], [-f.hw * 0.6, f.y, f.base]],
+          [[L, f.y, zLow], [0, f.y, zLow]], [[-L, f.y, zLow], [0, f.y, zLow]],
+          [[L, f.y, f.base], [0, f.y, f.base]], [[-L, f.y, f.base], [0, f.y, f.base]],
+        ];
+        for (const [a, bpt] of rays) {
+          const dg = firstHit(glass, a, bpt);
+          if (dg < Infinity && dg < firstHit(ship, a, bpt) - 1e-3) breaches++;
+        }
+      }
+    }
+    if (breaches) warnings.push(`CANOPY_BREACH: canopy glass shows through the hull (${breaches} probe rays)`);
+
     mark('sightline');
     const sl = k(ship.slice(pilotEye[2] - 0.6));
     const deck = sl.toPolygons().map((ring) => ring.map((p) => [p[0], p[1]]));
@@ -418,7 +478,7 @@ export function compileStarship(wasm, genomeIn, opts = {}) {
       parts: { hullStations: g.hull.stations.length, wingSurfaces: wingCount, nacelles: nacelleCount, mainEngines: g.engines.count, canopyStruts: b.struts },
       bridge: {
         pilotEyeXYZ: pilotEye.map(r2), deckHeadroomM: r2(headroom), canopyLengthM: r2(cL),
-        forwardSightlineClearPct: clearPct, sightlineRays: total,
+        forwardSightlineClearPct: clearPct, sightlineRays: total, canopyBreachRays: breaches,
         habitableVolumeM3: r1(cavity.volume()),
       },
       warnings,

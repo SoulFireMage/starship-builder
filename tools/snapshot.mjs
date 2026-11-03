@@ -2,6 +2,7 @@
 // Render ships to PNG in headless Chromium — an agent's "eyes".
 //   node tools/snapshot.mjs katiya heron           → snapshots/katiya.png …
 //   node tools/snapshot.mjs my-ship.json --cockpit
+//   node tools/snapshot.mjs my-ship.json --view below   (side|below|front|rear|top|cockpit|orbit)
 // Prints each ship's telemetry JSON alongside the image path.
 import { readFileSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -13,8 +14,9 @@ import { PRESETS } from '../src/genome.js';
 const { chromium } = createRequire(import.meta.url)('playwright');
 
 const args = process.argv.slice(2);
-const cockpit = args.includes('--cockpit');
-const targets = args.filter((a) => !a.startsWith('--'));
+const vi = args.indexOf('--view');
+const viewName = vi >= 0 ? args[vi + 1] : args.includes('--cockpit') ? 'cockpit' : 'orbit';
+const targets = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--view');
 if (!targets.length) targets.push(...Object.keys(PRESETS));
 mkdirSync('snapshots', { recursive: true });
 
@@ -29,9 +31,9 @@ await page.waitForFunction(() => window.drydock && window.drydock.telemetry, nul
 for (const t of targets) {
   const genome = PRESETS[t] || JSON.parse(readFileSync(t, 'utf8'));
   const tel = await page.evaluate(async (g) => { await window.drydock.load(g); return window.drydock.telemetry; }, genome);
-  await page.evaluate((c) => { window.drydock.view(c ? 'cockpit' : 'orbit'); }, cockpit);
+  await page.evaluate((v) => { window.drydock.view(v); }, viewName);
   await page.waitForTimeout(600);
-  const name = (PRESETS[t] ? t : t.replace(/.*\//, '').replace(/\.json$/, '')) + (cockpit ? '-cockpit' : '');
+  const name = (PRESETS[t] ? t : t.replace(/.*\//, '').replace(/\.json$/, '')) + (viewName !== 'orbit' ? `-${viewName}` : '');
   const path = `snapshots/${name}.png`;
   await page.locator('#viewport').screenshot({ path });
   console.log(JSON.stringify({ image: path, telemetry: tel }));

@@ -82,6 +82,18 @@ for (const [key, g] of Object.entries(PRESETS)) {
   compile(g, { cutaway: true });
 }
 
+console.log('1b. regression fixtures (ships that once broke)');
+{
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const dir = new URL('./fixtures/', import.meta.url);
+  for (const f of readdirSync(dir).filter((x) => x.endsWith('.json'))) {
+    const t = compile(JSON.parse(readFileSync(new URL(f, dir), 'utf8'))).telemetry;
+    ok(t.components === 1, `${f}: ${t.components} bodies`);
+    ok(!t.warnings.some((w) => /CANOPY_BREACH|DISCONNECTED/.test(w)), `${f}: ${t.warnings.join(' | ')}`);
+    console.log(`  ${f}: ${t.warnings.length ? t.warnings.join(' | ') : 'clean'}`);
+  }
+}
+
 console.log('2. robustness: random genomes + mutation walks');
 const tally = { compiled: 0, failed: 0, clean: 0, warn: {} };
 const judge = (g, label) => {
@@ -108,6 +120,8 @@ for (let w = 0; w < WALKS; w++) {
 const total = tally.compiled + tally.failed;
 console.log(`  ${tally.compiled}/${total} compiled, ${tally.clean} warning-free (${Math.round((100 * tally.clean) / Math.max(1, tally.compiled))}%)`, tally.warn);
 ok(tally.failed === 0, 'every genome in range must compile');
+ok(!tally.warn.CANOPY_BREACH, 'canopy never shows through the hull');
+ok(!tally.warn.DISCONNECTED, 'no floating parts');
 ok(tally.clean / Math.max(1, tally.compiled) > 0.5, 'most evolved genomes should be warning-free');
 
 console.log('3. determinism & encoding');

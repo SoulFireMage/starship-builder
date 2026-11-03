@@ -404,7 +404,11 @@ window.drydock = {
   compile: (g, opts) => mainC.compile(g, opts).then((r) => r.telemetry), // evaluate without displaying
   snapshot: () => view.snapshot(),
   manifoldCadScript: () => manifoldCadScript(),
-  view: (mode) => { mode === 'cockpit' ? view.cockpit() : view.orbit(); modeBtns(); },
+  view: (mode) => {                          // 'orbit' | 'cockpit' | 'side' | 'below' | 'front' | 'rear' | 'top'
+    if (mode === 'cockpit') view.cockpit(); else if (mode === 'orbit') { view.viewDir = null; view.orbit(); } else view.angle(mode);
+    modeBtns();
+    if (mode !== 'orbit' && mode !== 'cockpit') $('btn-spin').classList.remove('on');
+  },
   idle: () => waitIdle(),
 };
 function waitIdle() {
