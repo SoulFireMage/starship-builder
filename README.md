@@ -47,6 +47,7 @@ node tools/serve.mjs 8080     # → http://localhost:8080/
 ```bash
 npm install                   # installs manifold-3d for the Node tools only
 npm test                      # validity contract, WASM leak check, robustness over evolved genomes
+node tools/version.mjs        # bump the release version (stamped into every module URL to beat CDN caching)
 node tools/ui-test.mjs        # browser UI regression test (needs Playwright + Chromium)
 node tools/compile.mjs heron  # telemetry for a preset or a genome .json
 node tools/snapshot.mjs       # PNG renders in snapshots/ (needs Playwright + Chromium)

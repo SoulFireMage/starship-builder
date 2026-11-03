@@ -93,6 +93,18 @@ const box = await page.locator('#export-bar').boundingBox();
 ok(box && box.y < 844 + 200, `export bar sits right under the viewport on mobile (y=${box && Math.round(box.y)})`);
 ok(await page.evaluate(() => document.documentElement.scrollWidth) <= 390, 'no horizontal scroll on mobile');
 
+console.log('version');
+const { readFileSync } = await import('node:fs');
+const want = JSON.parse(readFileSync(new URL('../version.json', import.meta.url), 'utf8')).version;
+ok((await page.textContent('#version')) === `v${want}`, `footer shows v${want}`);
+ok(await page.isHidden('#update-banner'), 'no update banner when up to date');
+const p2 = await browser.newPage();
+await p2.route('**/version.json*', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ version: '99.0.0' }) }));
+await p2.goto(`http://localhost:${port}/`);
+await p2.waitForSelector('#update-banner:not([hidden])', { timeout: 30000 }).catch(() => {});
+ok(await p2.isVisible('#update-banner'), 'update banner appears when the server has a newer version');
+await p2.close();
+
 ok(errors.length === 0, `no page errors ${errors.join('; ')}`);
 await browser.close(); srv.close();
 console.log(failures ? `\n${failures} failure(s)` : '\nall good');

@@ -187,7 +187,17 @@ A sensible agent loop:
 
 Record intent in `meta.lineage`.
 
-## 8. UI rule: sliders look up, never hold
+## 8. Releases and caching
+
+The site's CDN tells browsers to cache scripts for 4 hours. So every relative
+module URL carries `?v=VERSION`, stamped by `tools/version.mjs` (which also
+writes `src/version.js` and `version.json`). Bump the version for every
+release; `npm test` fails if the stamps disagree. The page shows the
+version in its footer, and telemetry reports `compilerVersion`. On load, the
+page fetches `version.json` past all caches and offers a reload if a newer
+release exists.
+
+## 8a. UI rule: sliders look up, never hold
 
 Every slider gets a *getter* (`() => genome.wings[sel.wing]`), never an
 object reference. `normalize()` returns a fresh copy, so a held reference

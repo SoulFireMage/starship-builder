@@ -7,7 +7,7 @@
 // range compiles to a connected, plausibly-proportioned ship — the compiler
 // owns beauty, the genome owns variety.
 
-import { rng, clamp } from './geom.js';
+import { rng, clamp } from './geom.js?v=2.4.0';
 
 export const SCHEMA = 'starship-genome/2';
 

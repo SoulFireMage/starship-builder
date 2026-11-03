@@ -23,8 +23,9 @@
 //   5. Telemetry (status, genus, components, ray-cast sightline, proportions)
 //   6. Scope.free()
 
-import { Scope, monotoneCubic, superRing, airfoilRing, loft, lerp, clamp, smoothstep } from './geom.js';
-import { normalize, GENES } from './genome.js';
+import { Scope, monotoneCubic, superRing, airfoilRing, loft, lerp, clamp, smoothstep } from './geom.js?v=2.4.0';
+import { normalize, GENES } from './genome.js?v=2.4.0';
+import { VERSION } from './version.js?v=2.4.0';
 
 const DEG = Math.PI / 180;
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -463,6 +464,7 @@ export function compileStarship(wasm, genomeIn, opts = {}) {
 
     const telemetry = {
       schema: 'starship-telemetry/2',
+      compilerVersion: VERSION,
       name: g.meta.name,
       status: status === 'NoError' ? 'MANIFOLD_OK' : status,
       buildTimeMs: Math.round(now() - t0),

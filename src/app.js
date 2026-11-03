@@ -1,14 +1,15 @@
 // app.js — UI wiring: genome state, sliders, history, nursery, export.
-import { Viewport, ThumbRenderer } from './viewer.js';
-import { PRESETS, GENES, LIMITS, normalize, mutate, crossover, randomGenome, encodeGenome, decodeGenome } from './genome.js';
-import { buildManifoldCadScript, SOURCE_FILES } from './manifoldcad.js';
+import { Viewport, ThumbRenderer } from './viewer.js?v=2.4.0';
+import { PRESETS, GENES, LIMITS, normalize, mutate, crossover, randomGenome, encodeGenome, decodeGenome } from './genome.js?v=2.4.0';
+import { buildManifoldCadScript, SOURCE_FILES } from './manifoldcad.js?v=2.4.0';
+import { VERSION, RELEASED } from './version.js?v=2.4.0';
 
 const $ = (id) => document.getElementById(id);
 
 // ------------------------------------------------------------ compile client
 class Compiler {
   constructor() {
-    this.worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+    this.worker = new Worker(new URL('./worker.js?v=2.4.0', import.meta.url), { type: 'module' });
     this.seq = 0; this.pending = new Map();
     this.worker.onmessage = (e) => {
       const p = this.pending.get(e.data.id); this.pending.delete(e.data.id);
@@ -363,7 +364,7 @@ let srcCache = null;
 async function manifoldCadScript() {
   if (!srcCache) {
     srcCache = {};
-    for (const f of SOURCE_FILES) srcCache[f] = await (await fetch(new URL(`./${f}`, import.meta.url))).text();
+    for (const f of SOURCE_FILES) srcCache[f] = await (await fetch(new URL(`./${f}?v=${VERSION}`, import.meta.url))).text();
   }
   return buildManifoldCadScript({ sources: srcCache, genome, printLengthMm: printMm() });
 }
@@ -404,6 +405,7 @@ window.drydock = {
   compile: (g, opts) => mainC.compile(g, opts).then((r) => r.telemetry), // evaluate without displaying
   snapshot: () => view.snapshot(),
   manifoldCadScript: () => manifoldCadScript(),
+  version: VERSION,
   view: (mode) => {                          // 'orbit' | 'cockpit' | 'side' | 'below' | 'front' | 'rear' | 'top'
     if (mode === 'cockpit') view.cockpit(); else if (mode === 'orbit') { view.viewDir = null; view.orbit(); } else view.angle(mode);
     modeBtns();
@@ -414,6 +416,24 @@ window.drydock = {
 function waitIdle() {
   return new Promise((res) => { const tick = () => (busy || queued ? setTimeout(tick, 50) : res(lastResult && lastResult.telemetry)); tick(); });
 }
+
+// ------------------------------------------------------------ version
+// Show which build is running, and warn if the server has a newer one (the
+// CDN caches scripts for hours; version.json is fetched past every cache).
+$('version').textContent = `v${VERSION}`;
+$('version').title = `Starship Drydock v${VERSION}, released ${RELEASED}`;
+(async () => {
+  try {
+    const res = await fetch(new URL(`../version.json?t=${Date.now()}`, import.meta.url), { cache: 'no-store' });
+    const live = (await res.json()).version;
+    if (live && live !== VERSION) {
+      const bar = $('update-banner');
+      bar.querySelector('span').textContent = `You're running v${VERSION}; v${live} is available.`;
+      bar.hidden = false;
+    }
+  } catch (_) { /* offline or file:// — nothing to compare */ }
+})();
+$('btn-update').onclick = () => { location.reload(); };
 
 // ------------------------------------------------------------ boot
 let start = PRESETS.katiya;

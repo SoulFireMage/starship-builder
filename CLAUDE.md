@@ -7,7 +7,12 @@ work only counts once it's there.
 
 - If a session is started on a feature branch, still fast-forward or merge
   the work into `main` and push it (`git push origin HEAD:main`) when done.
-- Run `npm test` (and `node tools/ui-test.mjs` for UI changes) before pushing.
+- Before pushing a change to the site, bump the version: `node tools/version.mjs`
+  (patch bump; or pass e.g. `2.5.0`). The CDN caches scripts for hours, and the
+  version is stamped into every module URL, so an unbumped release can leave
+  people running stale code. The version shows in the page footer.
+- Run `npm test` (checks the version stamps too) and `node tools/ui-test.mjs`
+  for UI changes before pushing.
 - Don't open pull requests unless asked.
 
 ## Project notes
