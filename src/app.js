@@ -1,6 +1,7 @@
 // app.js — UI wiring: genome state, sliders, history, nursery, export.
 import { Viewport, ThumbRenderer } from './viewer.js';
 import { PRESETS, GENES, LIMITS, normalize, mutate, crossover, randomGenome, encodeGenome, decodeGenome } from './genome.js';
+import { buildManifoldCadScript, SOURCE_FILES } from './manifoldcad.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -305,9 +306,32 @@ $('btn-link').onclick = async () => {
   try { await navigator.clipboard.writeText(location.href); $('status').textContent = 'link copied'; } catch (_) { $('status').textContent = 'copy the address bar to share'; }
 };
 $('btn-dl-json').onclick = () => download(`${slug()}.genome.json`, new Blob([JSON.stringify(genome, null, 2)], { type: 'application/json' }));
-$('btn-dl-stl').onclick = () => { if (lastResult) download(`${slug()}.stl`, toSTL(lastResult.mesh)); };
+const printMm = () => Math.max(20, Math.min(2000, +$('print-mm').value || 150));
+const note = (msg) => { $('status').textContent = msg; };
+$('btn-dl-stl').onclick = async () => {
+  note('building printable solid…');
+  try {
+    const r = await mainC.compile(genome, { quality: 'final', printable: true });
+    download(`${slug()}-${printMm()}mm.stl`, toSTL(r.printMesh, printMm() / r.telemetry.dimensionsM.length));
+    note(`STL saved: one watertight body, ${printMm()} mm long`);
+  } catch (err) { note('STL export failed: ' + err.message); }
+};
+let srcCache = null;
+async function manifoldCadScript() {
+  if (!srcCache) {
+    srcCache = {};
+    for (const f of SOURCE_FILES) srcCache[f] = await (await fetch(new URL(`./${f}`, import.meta.url))).text();
+  }
+  return buildManifoldCadScript({ sources: srcCache, genome, printLengthMm: printMm() });
+}
+$('btn-dl-mcad').onclick = async () => download(`${slug()}.manifoldcad.mjs`, new Blob([await manifoldCadScript()], { type: 'text/javascript' }));
+$('btn-copy-mcad').onclick = async () => {
+  const text = await manifoldCadScript();
+  try { await navigator.clipboard.writeText(text); note('script copied: paste it into manifoldcad.org'); }
+  catch (_) { download(`${slug()}.manifoldcad.mjs`, new Blob([text], { type: 'text/javascript' })); note('clipboard blocked, so the script was downloaded instead'); }
+};
 
-function toSTL(m) {
+function toSTL(m, scale = 1) {
   const nt = m.indices.length / 3, buf = new ArrayBuffer(84 + nt * 50), dv = new DataView(buf);
   dv.setUint32(80, nt, true);
   let o = 84;
@@ -318,7 +342,7 @@ function toSTL(m) {
     const vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1;
     for (const v of [nx / l, ny / l, nz / l]) { dv.setFloat32(o, v, true); o += 4; }
-    for (const i of [a, b, c]) for (let j = 0; j < 3; j++) { dv.setFloat32(o, P[i + j], true); o += 4; }
+    for (const i of [a, b, c]) for (let j = 0; j < 3; j++) { dv.setFloat32(o, P[i + j] * scale, true); o += 4; }
     o += 2;
   }
   return new Blob([buf], { type: 'model/stl' });
@@ -336,6 +360,7 @@ window.drydock = {
   random: (seed) => { setGenome(randomGenome(seed), { reframe: true }); return waitIdle(); },
   compile: (g, opts) => mainC.compile(g, opts).then((r) => r.telemetry), // evaluate without displaying
   snapshot: () => view.snapshot(),
+  manifoldCadScript: () => manifoldCadScript(),
   view: (mode) => { mode === 'cockpit' ? view.cockpit() : view.orbit(); modeBtns(); },
   idle: () => waitIdle(),
 };

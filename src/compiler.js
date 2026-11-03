@@ -10,7 +10,9 @@
 //
 // Pure function of (wasm, genome, opts). No DOM, no Three.js, and every WASM
 // object it creates is freed before returning, so the caller never owns
-// manifold memory. Runs unchanged in Node (tools/) and in the browser.
+// manifold memory — unless opts.manifold is set, in which case the final ship
+// (and glass) Manifolds are also returned and the caller owns those two.
+// Runs unchanged in Node (tools/), the browser worker, and ManifoldCAD.
 //
 // Pipeline (see AGENT_SPEC.md §3):
 //   1. Spline-lofted hull, airfoil wings, revolved-profile nacelles, pylons
@@ -418,7 +420,21 @@ export function compileStarship(wasm, genomeIn, opts = {}) {
       timingsMs: timings,
     };
 
-    return { genome: g, mesh: meshOut, glass: glassOut, decor: { engines: engineGlow, pilotEye, lookDir }, deck, telemetry };
+    // printable: one welded solid (hull + whole canopy skin), for STL export
+    const printMesh = opts.printable ? extract(k(k(shell.isEmpty() ? ship : ship.add(shell)).calculateNormals(0, 50))) : null;
+    const out = { genome: g, printMesh, mesh: meshOut, glass: glassOut, decor: { engines: engineGlow, pilotEye, lookDir }, deck, telemetry };
+    if (opts.manifold) {
+      // Hand live manifolds to the caller (e.g. a ManifoldCAD script); they are
+      // released from the scope, so the caller owns and must delete them.
+      const own = (m) => { const i = S.items.indexOf(m); if (i >= 0) S.items.splice(i, 1); return m; };
+      out.manifold = own(ship);
+      out.glassManifold = glass.isEmpty() ? null : own(glass);
+      // the whole canopy skin (glass + frames): overlaps hull and frames by
+      // volume, so union welds it into one printable body (the glass alone
+      // only touches them along shared faces)
+      out.canopyManifold = shell.isEmpty() ? null : own(shell);
+    }
+    return out;
   } finally {
     S.free();
   }

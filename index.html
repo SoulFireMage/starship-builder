@@ -173,6 +173,22 @@
   </main>
 
   <aside class="right">
+    <h2>Export &amp; 3D print</h2>
+    <div class="row">
+      <label class="check" style="flex:2">print length
+        <input type="number" id="print-mm" value="150" min="20" max="2000" step="10" style="width:70px; background:#0a0e15; color:var(--text); border:1px solid var(--border); border-radius:4px; padding:4px; font:inherit" /> mm
+      </label>
+    </div>
+    <div class="row">
+      <button id="btn-dl-stl" class="primary" title="One welded, watertight solid with the canopy fused in">STL for printing</button>
+      <button id="btn-dl-mcad" title="Self-contained script for manifoldcad.org: the real compiler source plus this genome">ManifoldCAD script</button>
+    </div>
+    <div class="row">
+      <button id="btn-copy-mcad" title="Copy the ManifoldCAD script to paste into manifoldcad.org">Copy script</button>
+      <button id="btn-dl-json">Genome .json</button>
+    </div>
+    <div class="sub" id="export-note" style="margin-top:0">STL and script are scaled so the ship is the print length long. Paste the script into <a href="https://manifoldcad.org" target="_blank" rel="noopener" style="color:var(--accent)">manifoldcad.org</a> to see how it's built and export 3MF/GLB.</div>
+
     <h2>Telemetry</h2>
     <div class="stats" id="stats"></div>
     <div id="warnings"></div>
@@ -182,7 +198,6 @@
     <details><summary>Genome JSON</summary><div class="body">
       <textarea id="genome-json" spellcheck="false" aria-label="Genome JSON"></textarea>
       <div class="row"><button id="btn-apply">Apply</button><button id="btn-link">Copy link</button></div>
-      <div class="row"><button id="btn-dl-json">Save .json</button><button id="btn-dl-stl">Export .stl</button></div>
     </div></details>
   </aside>
 

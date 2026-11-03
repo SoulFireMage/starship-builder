@@ -28,7 +28,10 @@ starship models that humans and agents can both play with.
   - a ray-cast pilot sightline and deck headroom;
   - proportions;
   - a live `Manifold.slice()` deck plan.
-- **Export:** genome JSON, share links (`#g=…`), PNG, and STL (watertight, so printable).
+- **Export & 3D print** (right-hand panel, top):
+  - **STL for printing:** one welded, watertight body with the canopy fused in, scaled to your chosen print length in mm.
+  - **ManifoldCAD script:** a self-contained `.mjs` to paste into [manifoldcad.org](https://manifoldcad.org) (or run with `npx manifold-cad ship.mjs ship.3mf`). It is the drydock's *actual* compiler source plus your genome, so you can read exactly how the ship is built and export 3MF/GLB from there.
+  - Genome JSON, share links (`#g=…`) and PNG screenshots.
 
 ## Run it
 
@@ -45,6 +48,7 @@ npm install                   # installs manifold-3d for the Node tools only
 npm test                      # validity contract, WASM leak check, robustness over evolved genomes
 node tools/compile.mjs heron  # telemetry for a preset or a genome .json
 node tools/snapshot.mjs       # PNG renders in snapshots/ (needs Playwright + Chromium)
+node tools/manifoldcad.mjs katiya --mm 200 > katiya.mjs   # ManifoldCAD script for a preset/genome
 ```
 
 See [`AGENT_SPEC.md`](AGENT_SPEC.md) for the pipeline, the genome schema, the
@@ -68,6 +72,7 @@ blog. three.js and manifold-3d load from jsDelivr at pinned versions.
 | `src/compiler.js` | Genome → manifold → mesh + telemetry (pure; Node or browser) |
 | `src/worker.js` | Runs the compiler off the main thread |
 | `src/viewer.js` | Three.js: plating shader, glass, engine glow, starfield, thumbnails |
+| `src/manifoldcad.js` | Builds the self-contained ManifoldCAD script from the real sources |
 | `src/app.js` | UI wiring, nursery, history, export, `window.drydock` |
-| `tools/` | `test`, `compile`, `snapshot`, `serve` |
+| `tools/` | `test`, `compile`, `snapshot`, `manifoldcad`, `serve` |
 | `demo.html`, `docs/AGENT_SPEC_v1_gemini.md` | The original v1 (Gemini) demo and plan |

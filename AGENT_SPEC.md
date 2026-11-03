@@ -41,8 +41,14 @@ starship". Agents should take snapshots (`tools/snapshot.mjs`) too.
 
 `compileStarship(wasm, genome, opts) → { genome, mesh, glass, decor, deck, telemetry }`
 
-It's pure: no DOM, no Three.js, no retained WASM objects. It runs identically in
-Node and in the browser worker. `opts`: `{ quality: 'final'|'draft', cutaway: bool }`.
+It's pure: no DOM, no Three.js, no retained WASM objects (except with
+`opts.manifold`, which also returns the live `manifold`, `glassManifold` and
+`canopyManifold` for the caller to own; that's how the ManifoldCAD export works).
+`opts.printable` adds `printMesh`: hull and canopy skin welded into one solid. It runs identically in
+Node and in the browser worker. `opts`: `{ quality: 'final'|'draft', cutaway, manifold, printable }`.
+The compiler uses only `Manifold` and `Mesh` from the module it's given, so
+the same source runs inside ManifoldCAD unchanged (`src/manifoldcad.js`
+inlines it).
 
 | Stage | What happens | Rule |
 |---|---|---|
@@ -155,6 +161,7 @@ node tools/compile.mjs katiya                 # telemetry JSON for a preset or a
 node tools/compile.mjs ship.json --cutaway
 node tools/snapshot.mjs katiya my.json        # PNGs in snapshots/ + telemetry (needs Playwright)
 node tools/snapshot.mjs my.json --cockpit     # the pilot's view
+node tools/manifoldcad.mjs katiya --mm 200   # self-contained ManifoldCAD script (real compiler source + genome)
 node tools/serve.mjs 8080                     # local server (modules need http://)
 ```
 
@@ -163,6 +170,7 @@ In the browser (`window.drydock`):
 return a promise of the telemetry. Also:
 - `compile(genome)` evaluates a genome without displaying it;
 - `snapshot()` returns a PNG data URL;
+- `manifoldCadScript()` returns the ManifoldCAD script for the current ship;
 - `view('orbit' | 'cockpit')` switches the camera;
 - `genome`, `telemetry`, `presets` and `GENES` are readable properties.
 
