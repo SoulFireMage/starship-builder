@@ -1,90 +1,201 @@
-# Starship Builder (`starship-builder-`) — Agent & Architect Specification
+# Starship Drydock — Agent & Architect Specification (v2)
 
-## 1. Project Overview & Core Philosophy
-This repository hosts a browser-native, zero-build procedural 3D starship drydock powered by **`manifold-3d` (WebAssembly CSG kernel)** and **Three.js**.
-- **Dual-Audience Design:** The system is designed to be operated equally by **humans** (via high-density UI controls) and **autonomous AI agents / starship personas** (via declarative JSON Ship Genomes and deterministic spatial telemetry).
-- **Zero Fragile Meshes:** Never generate raw triangle soup or unverified Three.js `BufferGeometry` for ship hulls. All structural geometry MUST be constructed through `manifold-3d` boolean, hull, extrusion, and warp primitives so that every vessel is guaranteed **watertight, 2-manifold, and sliceable**.
-- **Zero-Build Static Architecture:** Keep the application runnable directly on GitHub Pages (`index.html` + ES Module imports via `esm.sh` or local static JS modules) without requiring Node.js bundlers unless explicitly requested.
+> v2 written by Claude, building on the v1 plan by Gemini (preserved in
+> [`docs/AGENT_SPEC_v1_gemini.md`](docs/AGENT_SPEC_v1_gemini.md)). The section
+> "What changed from v1" at the end explains each departure.
 
----
+## 1. Core idea: beauty in the compiler, variety in the genome
 
-## 2. Naval Coordinate & Symmetry Conventions
-All ship genomes, station plates, and camera anchors strictly obey naval/aerospace Z-Up coordinates:
-- **`+Y` = Forward (Bow)** / **`-Y` = Aft (Stern)** along the primary vessel spine.
-- **`+Z` = Dorsal (Up)** / **`-Z` = Ventral (Down)**.
-- **`+X` = Starboard (Right)** / **`-X` = Port (Left)**.
-- **Bilateral Symmetry (`X = 0`):** Construct starboard (`+X`) assemblies first, then mirror across the YZ plane using `.mirror([1, 0, 0])` and union into the central hull.
+A starship is a **genome** (a small JSON document of proportions and angles)
+compiled by a **pure function** into a watertight `manifold-3d` solid.
 
----
+- **The compiler owns aesthetics and plausibility.** Every part is built from
+  primitives that are smooth and well-proportioned by construction: hulls are
+  spline-lofted superellipse sections, wings are lofted NACA airfoils, nacelles
+  are lofted radius profiles, canopies are teardrop lofts sitting on the
+  *measured* hull. Parts are attached *relative to the hull*, so they can't float.
+  Cockpits are human-scale whatever the ship's size.
+- **The genome owns variety.** Genes are bounded proportions (fractions of ship
+  length), angles and counts. *Any* genome inside the ranges compiles to a
+  single connected, watertight ship. `npm test` checks this contract over
+  random genomes and long mutation/crossover walks.
+- **Selection supplies taste.** The nursery shows six offspring; a human (or an
+  agent with screenshots) picks the best and breeds again: interactive
+  evolution in the style of Dawkins' biomorphs. Beauty comes out of the grammar
+  because the grammar can only speak in beautiful primitives, and a judge
+  chooses among them.
 
-## 3. The Golden Order of Operations (Compiler Pipeline)
-When modifying or extending the geometry compiler (`compileStarship()`), agents MUST preserve this exact five-stage order of operations. **Violating Stage 2 vs. Stage 3 will warp the pilot's floor and break interior ergonomics.**
+**Dual audience.** Humans use sliders and the nursery. Agents read and write
+genome JSON and read telemetry, through Node tools or `window.drydock` in a
+browser. Telemetry is a *complement* to looking, not a substitute: numbers can
+say "watertight, connected, the pilot can see", but not "this looks like a
+starship". Agents should take snapshots (`tools/snapshot.mjs`) too.
 
-### Stage 1: Piecewise Spine Lofting (`Manifold.hull`)
-- **Rule:** Never pass all spine stations into a single `Manifold.hull([...])` call—doing so wraps the entire ship in a single convex envelope and destroys concave waists, intakes, and neck tapers.
-- **Pattern:** Iterate pairwise over adjacent spine stations `(S[i], S[i+1])`, call `Manifold.hull([S[i], S[i+1]])` on each adjacent pair, and boolean-union (`.add()`) the segments into `outerHull`.
+## 2. Coordinates (unchanged from v1)
 
-### Stage 2: Continuous Exterior Space-Warping (`outerHull.warp`)
-- Apply theme-specific coordinate displacement closures `(vert: Vec3) => void` to `outerHull` **before** carving interior rooms or hardpoints:
-  - `biomechanical`: Trigonometric rib fluting (`sin(y * freq) * cos(x * freq)`), organic spline sweep, and anhedral tendril droop.
-  - `brutalist`: Stepped terrace quantization (`Math.round(v / step) * step`) and subtracted rectangular armor trenches.
-  - `sleek`: High-aspect chine flaring, flattened ventral planing hulls, and swept leading edges.
+- `+Y` forward (bow), `-Y` aft (stern) · `+Z` dorsal, `-Z` ventral · `+X` starboard.
+- Bilateral symmetry about `X = 0`: build starboard, `.mirror([1,0,0])`, union.
+- Units are metres. Genes are fractions of `length` unless stated otherwise.
 
-### Stage 3: Euclidean Negative-Space Cavity Carving (`subtract`)
-Interior habitable spaces (cockpits, bridges, corridors, engineering bays) are carved **after** the exterior warp so decks remain flat and level:
-1. **Blister Reinforcement:** For any cavity near the hull surface (like a dorsal bridge), union a slightly larger outer shell (`cavity + 2 * wallThickness`) onto `outerHull` first so the room never punches into thin air.
-2. **Cavity Subtraction:** Subtract the interior room solid (`innerCavity`) from `outerHull`.
-3. **Aperture / Canopy Punching:** Construct a forward frustum or window cutout block, subtract structural window struts (`strutBar`) from that cutout block, and subtract the resulting punch from the hull. This leaves real 3D physical window struts visible from inside the cockpit.
-4. **Corridor Graphing:** Connect multiple internal cavities (`bridge -> spine_corridor -> engine_room`) by unioning their interior solids together into a single `habitableInterior` manifold before subtracting from `outerHull`.
+## 3. Compiler pipeline (`src/compiler.js`)
 
-### Stage 4: Automated Spatial Telemetry & Sightline Verification
-Every compilation cycle must populate the `telemetry` JSON object so an agent can self-verify its design without needing visual screenshots:
-- **`hullVolumeM3` & `surfaceAreaM2`:** Via `finalShip.volume()` and `finalShip.surfaceArea()`.
-- **`genusHoles`:** Via `finalShip.genus()` (verifies that window cutouts and thruster tunnels actually pierced the hull wall).
-- **`forwardLineOfSightClearPct`:** Project a test sight-cone (`Manifold.cylinder`) from `pilotEyeXYZ` along `+Y`, intersect it with `outerHull` (excluding the canopy blister), and compute `1.0 - (occlusion.volume() / sightBeam.volume())`. If `< 75%`, the bow or dorsal spine is blocking the pilot's forward horizon.
-- **`CrossSection` Deck Plans:** Call `finalShip.slice(zHeight)` and serialize `.toPolygons()` into the 2D SVG blueprint view.
+`compileStarship(wasm, genome, opts) → { genome, mesh, glass, decor, deck, telemetry }`
 
-### Stage 5: Explicit WASM Heap Cleanup (CRITICAL)
-`manifold-3d` compiles C++ objects into linear WebAssembly memory that **JavaScript Garbage Collection cannot see**.
-- Every intermediate `Manifold` and `CrossSection` instance created during `compileStarship()` **MUST** be explicitly freed via `.delete()` before the function returns.
-- Failure to call `.delete()` on intermediate primitives during interactive slider dragging will leak WASM memory and crash the browser tab within ~200 rebuilds.
+It's pure: no DOM, no Three.js, no retained WASM objects. It runs identically in
+Node and in the browser worker. `opts`: `{ quality: 'final'|'draft', cutaway: bool }`.
 
----
+| Stage | What happens | Rule |
+|---|---|---|
+| 0. Normalise | `normalize(genome)` clamps every gene and repairs structure | The compiler never trusts input |
+| 1. Parts | Hull: 72 rings sampled from **monotone cubic** splines through the stations, skinned by `loft()` → `Manifold.ofMesh` (validated). Wings: airfoil rings along the span with sweep, crescent, gull, dihedral and rounded tips. Nacelles: radius-profile lofts plus a pylon `hull()`. Main engines: bells on the stern | Monotone splines never overshoot, so widths can't go negative and hulls can't bulge past their stations |
+| 2. Union + exterior details | `Manifold.union(parts)`, then subtract nozzles and intakes | Exterior details may be carved before the warp |
+| 3. **Refine, then warp** | `refineToLength(edge)` → `warpBatch(W)` → `simplify(tol)` | **A warp only moves existing vertices.** Without refining first, ribs and terraces alias away: the v1 demo's rib warp was sampled at 6 points along the ship |
+| 4. Bridge + cavity | Ray-cast the **warped** dorsal surface at every canopy station; build the canopy, glass shell, frames and room on that measured surface. The room's roof respects the section's curvature at its edges | Warp the exterior; carve Euclidean interiors. Decks are dead level. Never warp a cavity |
+| 5. Clean + telemetry | `decompose()`; drop numerical debris (thin, near-zero-volume slivers); keep sealed voids; compute telemetry | Report components honestly: a real floating part is a `DISCONNECTED` warning |
+| 6. Free | `Scope.free()` in a `finally` | See §6 |
 
-## 4. Semantic Ship Genome Schema (`v1.1`)
-Agents mutating a vessel should read and emit state conforming to this JSON structure:
+All warps must be **injective** (they mustn't fold the surface through itself):
+- `bend` and `droop` are shears;
+- `terrace` is monotone in z for each vertical column;
+- `ribs` are small radial displacements, confined to the hull's own radius so pods and wings stay clean.
 
-```json
+### Why the warp maps are designed this way
+`warp(A − B) ≠ warp(A) − B`: warping and boolean subtraction don't commute.
+Stage 4 exploits that on purpose. The exterior is warped, and the interior
+stays Euclidean. v1 tried to bridge the two with a fixed blister; v2 measures
+the warped surface instead, because a rigid approximation of the warp is
+wrong by tens of centimetres at the ends of a long canopy on a bent spine.
+That's enough to break through a hull skin.
+
+## 4. Ship Genome schema (`starship-genome/2`, `src/genome.js`)
+
+```jsonc
 {
-  "meta": {
-    "id": "aktarian-scout-01",
-    "name": "Katiya-Class",
-    "author": "human_or_agent_id"
+  "schema": "starship-genome/2",
+  "meta": { "name": "Katiya-Class Scout", "author": "claude", "lineage": [], "generation": 0 },
+  "length": 64,                                  // metres, 30–140
+  "hull": {
+    "tumble": 0.18,                              // tumblehome: pinches the upper half
+    "stations": [                                // 3–9, sorted by t; t=0 stern, t=1 bow tip
+      { "t": 0, "w": 0.11, "top": 0.05, "bot": 0.04, "z": 0.01, "n": 2.2 }
+      // w = full beam, top/bot = height above/below spine, z = spine height
+      // (all /length); n = superellipse exponent: <2 chined/diamond, 2 elliptic, >2 slab
+    ]
   },
-  "theme": {
-    "archetype": "biomechanical | brutalist | sleek",
-    "warpIntensity": 0.65,
-    "palette": {
-      "hullPrimary": "#1d2d27",
-      "trimWire": "#00ffcc",
-      "interiorBulkhead": "#0f172a"
-    }
-  },
-  "parametric": {
-    "length": 64.0,
-    "wingSpan": 36.0,
-    "bridgeElevationZ": 2.2,
-    "noseDroopZ": -1.8,
-    "canopyStruts": 3
-  },
-  "cavities": [
-    {
-      "id": "bridge",
-      "type": "cockpit",
-      "pos": [0.0, 12.1, 2.2],
-      "size": [4.2, 6.8, 2.6],
-      "wallThickness": 0.45,
-      "pilotEyeOffset": [0.0, -1.2, 0.35]
-    }
-  ]
+  "style": { "bend": -0.018, "droop": 0.28, "ribAmp": 0.0016, "ribWave": 0.045, "terrace": 0, "terraceStep": 0.02 },
+  "wings": [                                     // 0–4; dihedral ≈ 90 with mirror:false = dorsal fin
+    { "t": 0.34, "z": -0.1, "span": 0.36, "chord": 0.36, "taper": 0.22, "sweep": 38,
+      "dihedral": -4, "gull": 0.08, "crescent": 0.22, "thick": 0.11, "mirror": true }
+  ],
+  "nacelles": [                                  // 0–3 (each mirrored unless dorsal/ventral)
+    { "mount": "wing", "wing": 0, "at": 0.62, "angle": 0, "offset": -0.012,
+      "length": 0.3, "radius": 0.026, "intake": 0.75, "exhaust": 0.8 }
+  ],
+  "engines": { "count": 2, "radius": 0.55 },     // stern main engines
+  "bridge": { "t": 0.72, "size": 1.0, "height": 1.0, "struts": 3 },
+  "palette": { "primary": "#2b3f37", "secondary": "#16201c", "accent": "#7fe0c2", "glow": "#38ffd2" }
 }
+```
+
+The ranges and mutation step sizes live in `GENES` in `src/genome.js`; that's
+the single source of truth, also used to build the UI sliders.
+Interior hull stations keep a minimum section; only the bow tip may be
+needle-thin. A wing-mounted nacelle on a missing or vertical wing is re-homed
+to the hull.
+
+### Evolution operators
+- `mutate(g, { seed, rate, strength })`: Gaussian point mutations, plus rare
+  structural ones (add or remove a station, wing or nacelle; shift the palette hue).
+  Deterministic for a given seed.
+- `crossover(a, b, { seed })`: uniform crossover by gene block. Hull stations
+  are blended when the station counts match, which keeps silhouettes coherent.
+- `randomGenome(seed)`: a cross of two presets, then heavily mutated. It starts sane.
+- `encodeGenome` / `decodeGenome`: URL-safe base64 for share links (`#g=…`).
+
+## 5. Telemetry (`starship-telemetry/2`)
+
+| Field | Meaning |
+|---|---|
+| `status` | `MANIFOLD_OK` or the manifold error status |
+| `dimensionsM`, `hullVolumeM3`, `surfaceAreaM2`, `triangles` | From the final solid |
+| `genus` | Topological handles (canopy frames, through-holes) |
+| `components` | Real bodies after debris removal. **Must be 1** |
+| `debrisRemoved`, `sealedVoids` | Housekeeping counts (not design faults) |
+| `proportions` | `beamToLength`, `heightToLength`, `planformFill` (top-view area ÷ bounding rectangle, via `project()`) |
+| `bridge.forwardSightlineClearPct` | A 7×5 ray fan (`rayCast`) from the pilot's eye, cast against the ship *without* canopy frames: does the bow or spine block the horizon? |
+| `bridge.deckHeadroomM`, `habitableVolumeM3`, `pilotEyeXYZ` | Interior checks |
+| `warnings[]` | `DISCONNECTED`, `BOW_OCCLUSION` (< 75% clear), `BRIDGE_CRAMPED` (< 1.95 m) |
+| `timingsMs` | Per-stage build cost |
+
+## 6. WASM hygiene (critical)
+
+`manifold-3d` objects live in WebAssembly memory that JS garbage collection
+can't see. In the compiler, **every** Manifold/CrossSection goes through
+`Scope.k()`, including intermediates of chained calls
+(`k(k(m.translate(…)).rotate(…))`), and `S.free()` runs in `finally`. The
+compiler returns only plain typed arrays.
+
+`npm test` instruments the bindings and fails on any leaked handle. Two traps,
+found the hard way:
+- `wasm.Manifold` is a JS wrapper class. Instance methods live on the
+  *embind* prototype of real instances, not on `wasm.Manifold.prototype`.
+- `delete` lives on embind's shared `ClassHandle` prototype.
+
+The test self-checks that it can see a deliberate leak before trusting a clean
+result.
+
+The viewer disposes Three.js geometries and materials when it replaces a ship.
+
+## 7. Interfaces for agents
+
+```bash
+npm install                                   # only manifold-3d, for the Node tools
+npm test                                      # contract + leak + robustness suite
+node tools/compile.mjs katiya                 # telemetry JSON for a preset or a genome file
+node tools/compile.mjs ship.json --cutaway
+node tools/snapshot.mjs katiya my.json        # PNGs in snapshots/ + telemetry (needs Playwright)
+node tools/snapshot.mjs my.json --cockpit     # the pilot's view
+node tools/serve.mjs 8080                     # local server (modules need http://)
+```
+
+In the browser (`window.drydock`):
+`load(genome)`, `mutate(opts)`, `crossover(other, opts)`, `random(seed)` each
+return a promise of the telemetry. Also:
+- `compile(genome)` evaluates a genome without displaying it;
+- `snapshot()` returns a PNG data URL;
+- `view('orbit' | 'cockpit')` switches the camera;
+- `genome`, `telemetry`, `presets` and `GENES` are readable properties.
+
+A sensible agent loop:
+1. Read the telemetry and `GENES`.
+2. Propose mutations.
+3. Reject any with warnings.
+4. Snapshot the survivors and judge by eye.
+5. Keep the best and repeat.
+
+Record intent in `meta.lineage`.
+
+## 8. Extending the compiler: checklist
+
+1. Add the genes, with `[min, max, sigma]`, to `GENES`, and defaults in `normalize`.
+2. Build the part from lofts or revolves in its own coordinates, **attached
+   relative to the hull or a wing**. Never use absolute coordinates.
+3. Wrap every manifold handle in `k()`.
+4. Exterior part → union before the warp. Interior space → carve after it, on
+   measured surfaces.
+5. Add a preset that uses it, run `npm test`, and look at it (`tools/snapshot.mjs`).
+
+## 9. What changed from v1, and why
+
+| v1 (Gemini plan) | v2 | Reason |
+|---|---|---|
+| Pairwise `hull()` of 5 station plates | Spline-sampled ring loft via validated `ofMesh` | Hulls are convex per segment and crease at every station; lofts are smooth and can be concave |
+| Warp directly | Refine → warp → simplify | Undersampling: the warp had 96 vertices on 6 stations to act on |
+| Theme switch (`biomechanical` / `brutalist` / `sleek`) | Continuous style genes; themes became presets | Evolvable: offspring can sit *between* themes |
+| Cube blister and box cockpit | Teardrop canopy on the measured surface, separate glass, real frames | That was most of the boxiness |
+| Volume-ratio sight cone | Ray fan with `rayCast` | Exact, cheap, and ignores deliberate struts |
+| Hard-coded `MANIFOLD_WATERTIGHT` | `status()`, `decompose()`, warnings | Telemetry has to be able to say no |
+| Manual `.delete()` list (it leaked) | `Scope` + instrumented leak test | The v1 demo leaked more than a dozen handles per rebuild |
+| Main-thread compile, `esm.sh`, manifold 3.0.0 | Module worker, jsDelivr, manifold 3.5.4 | Responsive UI; `rayCast`, `warpBatch` |
+
+The v1 demo is kept as `demo.html`.

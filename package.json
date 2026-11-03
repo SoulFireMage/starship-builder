@@ -1,0 +1,16 @@
+{
+  "name": "starship-builder",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Genome-driven procedural starship drydock built on manifold-3d. The site itself is zero-build; npm is only used for the headless agent tools.",
+  "type": "module",
+  "scripts": {
+    "test": "node tools/test.mjs",
+    "compile": "node tools/compile.mjs",
+    "serve": "node tools/serve.mjs",
+    "snapshot": "node tools/snapshot.mjs"
+  },
+  "devDependencies": {
+    "manifold-3d": "3.5.4"
+  }
+}
