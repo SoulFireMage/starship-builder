@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manifold-3D Starship Drydock & Agent Compiler</title>
+  <style>
+    :root {
+      --bg: #0b0e14;
+      --panel: #131822;
+      --border: #263042;
+      --accent: #00f0ff;
+      --text: #e2e8f0;
+      --muted: #8b9bb4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', Consolas, monospace;
+      font-size: 12px;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 340px 1fr 320px;
+      height: 100vh;
+    }
+    .sidebar {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .sidebar-right {
+      background: var(--panel);
+      border-left: 1px solid var(--border);
+      padding: 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    h1 { font-size: 14px; color: var(--accent); letter-spacing: 0.5px; text-transform: uppercase; }
+    h2 { font-size: 11px; color: var(--muted); text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-top: 4px; }
+    .control-group { display: flex; flex-direction: column; gap: 4px; }
+    .control-header { display: flex; justify-content: space-between; color: var(--text); }
+    input[type="range"], select {
+      width: 100%;
+      background: #0b0e14;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 4px;
+      border-radius: 3px;
+    }
+    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    button {
+      background: #1c2536;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 11px;
+      border-radius: 3px;
+      transition: 0.15s;
+    }
+    button:hover { border-color: var(--accent); }
+    button.active {
+      background: rgba(0, 240, 255, 0.15);
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: bold;
+    }
+    #viewport-container { position: relative; width: 100%; height: 100%; }
+    #hud-overlay {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      pointer-events: none;
+      background: rgba(11, 14, 20, 0.78);
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      border-radius: 4px;
+    }
+    pre {
+      background: #080a0f;
+      border: 1px solid var(--border);
+      padding: 8px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 11px;
+      color: #a5d6ff;
+      line-height: 1.4;
+    }
+    #slice-svg-box {
+      background: #080a0f;
+      border: 1px solid var(--border);
+      height: 180px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Left UI: Human Sliders & Camera Controls -->
+  <div class="sidebar">
+    <h1>Manifold Drydock v1.0</h1>
+    <div id="wasm-status" style="color: #fbbf24;">Initializing manifold-3d WASM...</div>
+
+    <h2>Camera Mode</h2>
+    <div class="btn-row">
+      <button id="btn-cam-orbit" class="active">External Orbit</button>
+      <button id="btn-cam-cockpit">Pilot Cockpit View</button>
+    </div>
+    <label style="display:flex; align-items:center; gap:6px; margin-top:4px; cursor:pointer;">
+      <input type="checkbox" id="chk-cutaway" /> Slice Bridge Roof (Inspect Cavity)
+    </label>
+
+    <h2>Ship Theme Grammar</h2>
+    <select id="sel-theme">
+      <option value="biomechanical">Biomechanical (Organic Rib Warp)</option>
+      <option value="brutalist">Brutalist Industrial (Slab Terraced)</option>
+      <option value="sleek">Sleek Imperial (Razor Chine Loft)</option>
+    </select>
+
+    <h2>Hull Spine & Outriggers</h2>
+    <div class="control-group">
+      <div class="control-header"><span>Ship Length (Y)</span><span id="val-length">64m</span></div>
+      <input type="range" id="rng-length" min="40" max="90" step="2" value="64" />
+    </div>
+    <div class="control-group">
+      <div class="control-header"><span>Outrigger Wing Span (X)</span><span id="val-span">36m</span></div>
+      <input type="range" id="rng-span" min="14" max="56" step="1" value="36" />
+    </div>
+    <div class="control-group">
+      <div class="control-header"><span>Warp Field Intensity</span><span id="val-warp">0.65</span></div>
+      <input type="range" id="rng-warp" min="0" max="1.5" step="0.05" value="0.65" />
+    </div>
+
+    <h2>Bridge Cavity & Canopy Boolean</h2>
+    <div class="control-group">
+      <div class="control-header"><span>Bridge Dorsal Height (Z)</span><span id="val-bridge-z">2.2m</span></div>
+      <input type="range" id="rng-bridge-z" min="0.5" max="4.5" step="0.1" value="2.2" />
+    </div>
+    <div class="control-group">
+      <div class="control-header"><span>Nose Droop (Sightline)</span><span id="val-nose-z">-1.8m</span></div>
+      <input type="range" id="rng-nose-z" min="-5.0" max="2.5" step="0.2" value="-1.8" />
+    </div>
+    <div class="control-group">
+      <div class="control-header"><span>Canopy Window Struts</span><span id="val-struts">3</span></div>
+      <input type="range" id="rng-struts" min="1" max="5" step="1" value="3" />
+    </div>
+  </div>
+
+  <!-- Center: Three.js WebGL Viewport -->
+  <div id="viewport-container">
+    <div id="hud-overlay">
+      <div id="hud-mode">CAMERA: EXTERNAL ORBIT</div>
+      <div id="hud-fov" style="color: var(--muted); margin-top:2px;">Drag to orbit / Scroll to zoom</div>
+    </div>
+  </div>
+
+  <!-- Right UI: Agent Telemetry & Z-Slice Blueprint -->
+  <div class="sidebar-right">
+    <h2>2D Manifold.slice() Deck Plan</h2>
+    <div id="slice-svg-box"></div>
+
+    <h2>Agent Spatial Telemetry</h2>
+    <pre id="telemetry-json">Compiling...</pre>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://esm.sh/three@0.168.0';
+    import { OrbitControls } from 'https://esm.sh/three@0.168.0/examples/jsm/controls/OrbitControls.js';
+    import Module from 'https://esm.sh/manifold-3d@3.0.0';
+
+    // --- 1. Initialize Three.js Scene ---
+    const container = document.getElementById('viewport-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x07090e);
+
+    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
+    camera.position.set(42, 35, 22);
+    camera.up.set(0, 0, 1); // Z-Up naval convention (+Y is forward bow)
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(0, 4, 0);
+
+    // Lighting (External + Internal Bridge Spot)
+    scene.add(new THREE.AmbientLight(0x405068, 1.4));
+    const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+    sun.position.set(50, 60, 80);
+    scene.add(sun);
+
+    const rimLight = new THREE.DirectionalLight(0x00f0ff, 1.0);
+    rimLight.position.set(-50, -40, -30);
+    scene.add(rimLight);
+
+    const cockpitLight = new THREE.PointLight(0x00ffcc, 1.8, 12);
+    scene.add(cockpitLight);
+
+    // Subtle reference grid
+    const grid = new THREE.GridHelper(120, 24, 0x1e293b, 0x111827);
+    grid.rotation.x = Math.PI / 2;
+    grid.position.z = -8;
+    scene.add(grid);
+
+    let shipMeshGroup = new THREE.Group();
+    scene.add(shipMeshGroup);
+
+    // --- 2. Load Manifold-3D WASM Kernel ---
+    const wasm = await Module();
+    wasm.setup();
+    const { Manifold, CrossSection } = wasm;
+    document.getElementById('wasm-status').textContent = 'manifold-3d WASM Ready (Exact CSG)';
+    document.getElementById('wasm-status').style.color = '#34d399';
+
+    // Helper: Create a lofted cross-section plate at (y, z)
+    function makeStationPlate(width, height, yPos, zPos, segments = 8) {
+      // Create a thin cylinder/prism oriented along the Y axis
+      const plate = Manifold.cylinder(0.2, 1.0, 1.0, segments, true)
+        .rotate([90, 0, 0])
+        .scale([width * 0.5, 1.0, height * 0.5])
+        .translate([0, yPos, zPos]);
+      return plate;
+    }
+
+    // --- 3. Core Ship Compiler (JSON Genome -> Manifold -> Three.js) ---
+    let currentPilotEye = new THREE.Vector3(0, 14, 2.2);
+    let cameraMode = 'orbit';
+
+    function compileStarship() {
+      const t0 = performance.now();
+
+      // Read current genome state from UI controls
+      const theme = document.getElementById('sel-theme').value;
+      const length = parseFloat(document.getElementById('rng-length').value);
+      const span = parseFloat(document.getElementById('rng-span').value);
+      const warpAmp = parseFloat(document.getElementById('rng-warp').value);
+      const bridgeZ = parseFloat(document.getElementById('rng-bridge-z').value);
+      const noseZ = parseFloat(document.getElementById('rng-nose-z').value);
+      const strutCount = parseInt(document.getElementById('rng-struts').value, 10);
+      const cutaway = document.getElementById('chk-cutaway').checked;
+
+      const halfL = length * 0.5;
+      const segs = theme === 'brutalist' ? 4 : (theme === 'sleek' ? 6 : 16);
+
+      // Step A: Piecewise Spine Lofting via Manifold.hull()
+      const stations = [
+        makeStationPlate(0.8,  0.6,  halfL,        noseZ, segs),        // Nose tip
+        makeStationPlate(8.5,  5.0,  halfL * 0.45, 0.2,   segs),        // Fore deck
+        makeStationPlate(15.0, 8.2,  0.0,          0.8,   segs),        // Mid chest
+        makeStationPlate(11.0, 6.5, -halfL * 0.55, 0.0,   segs),        // Drive waist
+        makeStationPlate(5.0,  3.5, -halfL,        1.2,   segs)         // Stern tail
+      ];
+
+      let outerHull = Manifold.hull([stations[0], stations[1]]);
+      for (let i = 1; i < stations.length - 1; i++) {
+        const segHull = Manifold.hull([stations[i], stations[i + 1]]);
+        outerHull = outerHull.add(segHull);
+      }
+
+      // Step B: Bilateral Outrigger Wings (Hulled root-to-tip & mirrored)
+      const wingRoot = Manifold.sphere(1.0, segs)
+        .scale([3.5, halfL * 0.35, 1.8])
+        .translate([4.5, 2.0, 0.2]);
+      const wingTip = Manifold.sphere(1.0, segs)
+        .scale([1.2, halfL * 0.28, 0.7])
+        .translate([span * 0.5, -halfL * 0.35, -2.2]);
+
+      const rightWing = Manifold.hull([wingRoot, wingTip]);
+      const leftWing = rightWing.mirror([1, 0, 0]);
+      outerHull = outerHull.add(rightWing).add(leftWing);
+
+      // Step C: Apply Theme Space-Warp BEFORE cutting the Euclidean Cockpit
+      if (warpAmp > 0.01) {
+        outerHull = outerHull.warp((vert) => {
+          const x = vert[0], y = vert[1], z = vert[2];
+          if (theme === 'biomechanical') {
+            // Organic thoracic rib fluting + tendon sweep
+            const ribWave = Math.sin(y * 0.45) * Math.cos(x * 0.35) * warpAmp;
+            vert[2] += ribWave;
+            vert[0] += Math.sin(y * 0.25) * warpAmp * 0.4 * Math.sign(x);
+          } else if (theme === 'brutalist') {
+            // Quantized armor slab terracing
+            const step = 1.25 / Math.max(0.2, warpAmp);
+            vert[2] = Math.round(z / step) * step;
+          } else if (theme === 'sleek') {
+            // Razor-chine lateral flare
+            vert[0] *= 1.0 + (Math.abs(z) < 1.2 ? warpAmp * 0.22 : 0);
+          }
+        });
+      }
+
+      // Step D: Construct & Carve Negative-Space Cockpit Bridge
+      const bridgeY = halfL * 0.38;
+      const wallThickness = 0.45;
+      const roomW = 4.2, roomL = 6.8, roomH = 2.6;
+
+      // 1. Union an outer canopy blister so the bridge always has hull mass around it
+      const outerBlister = Manifold.cube([roomW + wallThickness * 2, roomL + wallThickness * 2, roomH + wallThickness * 2], true)
+        .translate([0, bridgeY, bridgeZ]);
+      outerHull = outerHull.add(outerBlister);
+
+      // 2. Subtract the hollow interior bridge room
+      const innerCavity = Manifold.cube([roomW, roomL, roomH], true)
+        .translate([0, bridgeY, bridgeZ]);
+
+      // 3. Build the forward viewport punch (minus vertical canopy struts)
+      let canopyPunch = Manifold.cube([roomW + 2.0, 14.0, 1.3], true)
+        .translate([0, bridgeY + 6.5, bridgeZ + 0.35]);
+
+      for (let s = 0; s < strutCount; s++) {
+        const frac = strutCount === 1 ? 0 : (s / (strutCount - 1)) - 0.5;
+        const strutX = frac * (roomW - 0.6);
+        const strutBar = Manifold.cube([0.24, 16.0, 3.0], true)
+          .rotate([0, -12 * frac, 0])
+          .translate([strutX, bridgeY + 4.0, bridgeZ + 0.35]);
+        canopyPunch = canopyPunch.subtract(strutBar);
+      }
+
+      let finalShip = outerHull.subtract(innerCavity).subtract(canopyPunch);
+
+      // Optional Z-Cutaway to inspect the watertight hollow walls from outside
+      if (cutaway) {
+        const roofCut = Manifold.cube([100, 120, 20], true)
+          .translate([0, 0, bridgeZ + 10.6]);
+        finalShip = finalShip.subtract(roofCut);
+      }
+
+      // Step E: Sightline Ray/Cone Obstruction Check from Pilot Seat
+      currentPilotEye.set(0, bridgeY - 1.2, bridgeZ + 0.35);
+      cockpitLight.position.copy(currentPilotEye);
+
+      const sightBeam = Manifold.cylinder(halfL, 0.1, 1.8, 12, false)
+        .rotate([-90, 0, 0])
+        .translate([0, currentPilotEye.y + 1.5, currentPilotEye.z - 0.2]);
+      const sightOcclusion = outerHull.subtract(outerBlister).intersect(sightBeam);
+      const occludedRatio = Math.min(1.0, sightOcclusion.volume() / Math.max(0.01, sightBeam.volume()));
+      const clearRatio = ((1.0 - occludedRatio) * 100).toFixed(1);
+
+      // Step F: Generate 2D Deck Plan Cross-Section SVG via Manifold.slice()
+      const slicePolys = finalShip.slice(bridgeZ + 0.2);
+      renderSliceSvg(slicePolys, length, span);
+      slicePolys.delete();
+
+      // Step G: Convert Manifold Mesh -> Three.js BufferGeometry
+      const meshData = finalShip.getMesh();
+      const geometry = new THREE.BufferGeometry();
+
+      const numVerts = meshData.numVert;
+      const positions = new Float32Array(numVerts * 3);
+      for (let i = 0; i < numVerts; i++) {
+        positions[i * 3]     = meshData.vertProperties[i * meshData.numProp];
+        positions[i * 3 + 1] = meshData.vertProperties[i * meshData.numProp + 1];
+        positions[i * 3 + 2] = meshData.vertProperties[i * meshData.numProp + 2];
+      }
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setIndex(new THREE.BufferAttribute(meshData.triVerts, 1));
+      geometry.computeVertexNormals();
+
+      // Replace mesh in Three.js scene
+      scene.remove(shipMeshGroup);
+      shipMeshGroup = new THREE.Group();
+
+      const matColors = {
+        biomechanical: { color: 0x1d2d27, rough: 0.35, metal: 0.65, wire: 0x00ffcc },
+        brutalist:     { color: 0x333942, rough: 0.75, metal: 0.45, wire: 0xfbbf24 },
+        sleek:         { color: 0xd8dee9, rough: 0.20, metal: 0.85, wire: 0x38bdf8 }
+      }[theme];
+
+      const hullMat = new THREE.MeshStandardMaterial({
+        color: matColors.color,
+        roughness: matColors.rough,
+        metalness: matColors.metal,
+        flatShading: theme === 'brutalist'
+      });
+
+      const mainMesh = new THREE.Mesh(geometry, hullMat);
+      shipMeshGroup.add(mainMesh);
+
+      // Subtle topological edge overlay
+      const edges = new THREE.EdgesGeometry(geometry, 28);
+      const lineMat = new THREE.LineBasicMaterial({ color: matColors.wire, transparent: true, opacity: 0.22 });
+      shipMeshGroup.add(new THREE.LineSegments(edges, lineMat));
+
+      // Add a small glowing console reference inside the bridge
+      const consoleGeo = new THREE.BoxGeometry(1.6, 0.8, 0.7);
+      const consoleMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, emissive: matColors.wire, emissiveIntensity: 0.4 });
+      const consoleMesh = new THREE.Mesh(consoleGeo, consoleMat);
+      consoleMesh.position.set(0, bridgeY + 1.4, bridgeZ - 0.6);
+      shipMeshGroup.add(consoleMesh);
+
+      scene.add(shipMeshGroup);
+
+      // Telemetry output for Agent / UI
+      const buildMs = (performance.now() - t0).toFixed(1);
+      const telemetry = {
+        buildTimeMs: Number(buildMs),
+        status: "MANIFOLD_WATERTIGHT",
+        themeArchetype: theme,
+        metrics: {
+          lengthM: length,
+          beamM: span,
+          hullVolumeM3: Number(finalShip.volume().toFixed(1)),
+          surfaceAreaM2: Number(finalShip.surfaceArea().toFixed(1)),
+          genusHoles: finalShip.genus(),
+          bridgeHabitableM3: Number(innerCavity.volume().toFixed(1))
+        },
+        cockpitDiagnostics: {
+          pilotEyeXYZ: [0, Number(currentPilotEye.y.toFixed(2)), Number(currentPilotEye.z.toFixed(2))],
+          forwardLineOfSightClearPct: Number(clearRatio),
+          status: clearRatio > 80 ? "CLEAR_BOW_HORIZON" : "BOW_OCCLUSION_WARNING"
+        }
+      };
+      document.getElementById('telemetry-json').textContent = JSON.stringify(telemetry, null, 2);
+
+      // Clean up WASM heap objects
+      stations.forEach(s => s.delete());
+      wingRoot.delete(); wingTip.delete(); rightWing.delete(); leftWing.delete();
+      outerHull.delete(); outerBlister.delete(); innerCavity.delete();
+      canopyPunch.delete(); sightBeam.delete(); sightOcclusion.delete(); finalShip.delete();
+
+      updateCameraView();
+    }
+
+    function renderSliceSvg(polys, length, span) {
+      const numPolys = polys.numContour();
+      let pathStr = '';
+      // Extract 2D polygon rings from CrossSection
+      const verts = polys.toPolygons();
+      for (const ring of verts) {
+        if (ring.length === 0) continue;
+        pathStr += `M ${ring[0][0].toFixed(2)} ${(-ring[0][1]).toFixed(2)} `;
+        for (let i = 1; i < ring.length; i++) {
+          pathStr += `L ${ring[i][0].toFixed(2)} ${(-ring[i][1]).toFixed(2)} `;
+        }
+        pathStr += 'Z ';
+      }
+      const vx = span * 0.65;
+      const vy = length * 0.6;
+      document.getElementById('slice-svg-box').innerHTML = `
+        <svg viewBox="${-vx} ${-vy} ${vx * 2} ${vy * 2}" width="100%" height="100%">
+          <path d="${pathStr}" fill="rgba(0, 240, 255, 0.18)" stroke="#00f0ff" stroke-width="0.45" fill-rule="evenodd" />
+          <circle cx="0" cy="${-currentPilotEye.y}" r="0.8" fill="#fbbf24" />
+        </svg>
+      `;
+    }
+
+    function updateCameraView() {
+      if (cameraMode === 'cockpit') {
+        camera.position.copy(currentPilotEye);
+        controls.target.set(0, currentPilotEye.y + 20.0, currentPilotEye.z - 0.5);
+        controls.update();
+        document.getElementById('hud-mode').textContent = 'CAMERA: PILOT BRIDGE SEAT (INTERNAL MANIFOLD CAVITY)';
+        document.getElementById('hud-fov').textContent = 'Looking +Y through boolean-punched canopy struts across bow';
+      } else {
+        document.getElementById('hud-mode').textContent = 'CAMERA: EXTERNAL DRYDOCK ORBIT';
+        document.getElementById('hud-fov').textContent = 'Drag to orbit / Scroll to zoom';
+      }
+    }
+
+    // --- 4. Wire Up UI Listeners ---
+    const inputs = ['sel-theme', 'rng-length', 'rng-span', 'rng-warp', 'rng-bridge-z', 'rng-nose-z', 'rng-struts', 'chk-cutaway'];
+    inputs.forEach(id => {
+      document.getElementById(id).addEventListener('input', () => {
+        document.getElementById('val-length').textContent = document.getElementById('rng-length').value + 'm';
+        document.getElementById('val-span').textContent = document.getElementById('rng-span').value + 'm';
+        document.getElementById('val-warp').textContent = document.getElementById('rng-warp').value;
+        document.getElementById('val-bridge-z').textContent = document.getElementById('rng-bridge-z').value + 'm';
+        document.getElementById('val-nose-z').textContent = document.getElementById('rng-nose-z').value + 'm';
+        document.getElementById('val-struts').textContent = document.getElementById('rng-struts').value;
+        compileStarship();
+      });
+    });
+
+    document.getElementById('btn-cam-orbit').addEventListener('click', () => {
+      cameraMode = 'orbit';
+      document.getElementById('btn-cam-orbit').classList.add('active');
+      document.getElementById('btn-cam-cockpit').classList.remove('active');
+      camera.position.set(42, 35, 22);
+      controls.target.set(0, 4, 0);
+      controls.update();
+      updateCameraView();
+    });
+
+    document.getElementById('btn-cam-cockpit').addEventListener('click', () => {
+      cameraMode = 'cockpit';
+      document.getElementById('btn-cam-cockpit').classList.add('active');
+      document.getElementById('btn-cam-orbit').classList.remove('active');
+      updateCameraView();
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+
+    // Initial compile & render loop
+    compileStarship();
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
