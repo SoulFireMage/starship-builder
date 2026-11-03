@@ -26,8 +26,21 @@
     body {
       background: var(--bg); color: var(--text);
       font: 12px/1.45 'JetBrains Mono', ui-monospace, Consolas, monospace;
-      display: grid; grid-template-columns: 300px 1fr 310px; height: 100vh; overflow: hidden;
+      display: grid; grid-template-columns: 300px 1fr 310px; grid-template-rows: minmax(0, 1fr) auto;
+      height: 100vh; overflow: hidden;
     }
+    aside.left { grid-column: 1; grid-row: 1; } main { grid-column: 2; grid-row: 1; } aside.right { grid-column: 3; grid-row: 1; }
+    #export-bar {
+      grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+      padding: 8px 14px; background: var(--panel-2); border-top: 1px solid var(--border);
+    }
+    #export-bar .bar-title { color: var(--accent); text-transform: uppercase; letter-spacing: .05em; font-size: 11px; font-weight: 600; }
+    #export-bar input[type=number] { width: 72px; background: #0a0e15; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px; font: inherit; }
+    #export-bar .sub { margin: 0; } #export-bar a { color: var(--accent); }
+    .actions { display: flex; flex-wrap: wrap; gap: 5px; }
+    button:disabled { opacity: .4; cursor: not-allowed; border-color: var(--border) !important; }
+    .slider.inert .lbl, .slider.inert input { opacity: .45; }
+    .why { color: var(--muted); font-size: 10.5px; font-style: italic; }
     aside { background: var(--panel); overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
     aside.left { border-right: 1px solid var(--border); }
     aside.right { border-left: 1px solid var(--border); }
@@ -101,6 +114,8 @@
     @media (max-width: 980px) {
       body { display: flex; flex-direction: column; height: auto; overflow: auto; }
       main { height: 62vh; flex: 0 0 auto; position: sticky; top: 0; z-index: 2; order: -1; }
+      #export-bar { order: -1; padding: 10px 16px; }
+      #export-bar .sub { flex-basis: 100%; }
       aside { border: 0 !important; border-top: 1px solid var(--border) !important; padding: 14px 16px; }
       #kids { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       #nursery { left: 6px; right: 6px; bottom: 6px; padding: 6px; }
@@ -172,23 +187,20 @@
     </div>
   </main>
 
-  <aside class="right">
-    <h2>Export &amp; 3D print</h2>
-    <div class="row">
-      <label class="check" style="flex:2">print length
-        <input type="number" id="print-mm" value="150" min="20" max="2000" step="10" style="width:70px; background:#0a0e15; color:var(--text); border:1px solid var(--border); border-radius:4px; padding:4px; font:inherit" /> mm
-      </label>
-    </div>
-    <div class="row">
-      <button id="btn-dl-stl" class="primary" title="One welded, watertight solid with the canopy fused in">STL for printing</button>
-      <button id="btn-dl-mcad" title="Self-contained script for manifoldcad.org: the real compiler source plus this genome">ManifoldCAD script</button>
-    </div>
-    <div class="row">
-      <button id="btn-copy-mcad" title="Copy the ManifoldCAD script to paste into manifoldcad.org">Copy script</button>
-      <button id="btn-dl-json">Genome .json</button>
-    </div>
-    <div class="sub" id="export-note" style="margin-top:0">STL and script are scaled so the ship is the print length long. Paste the script into <a href="https://manifoldcad.org" target="_blank" rel="noopener" style="color:var(--accent)">manifoldcad.org</a> to see how it's built and export 3MF/GLB.</div>
+  <section id="export-bar" aria-label="Export and 3D print">
+    <span class="bar-title">Export &amp; 3D print</span>
+    <label class="check">print length
+      <input type="number" id="print-mm" value="150" min="20" max="2000" step="10" /> mm
+    </label>
+    <button id="btn-dl-stl" class="primary" title="One welded, watertight solid with the canopy fused in, scaled to the print length">STL for printing</button>
+    <button id="btn-dl-mcad" title="Self-contained script for manifoldcad.org: the real compiler source plus this genome">ManifoldCAD script</button>
+    <button id="btn-copy-mcad" title="Copy the ManifoldCAD script to paste into manifoldcad.org">Copy script</button>
+    <button id="btn-dl-json">Genome .json</button>
+    <button id="btn-link">Copy share link</button>
+    <span class="sub" id="export-note">Paste the script into <a href="https://manifoldcad.org" target="_blank" rel="noopener">manifoldcad.org</a> to read how it's built and export 3MF/GLB.</span>
+  </section>
 
+  <aside class="right">
     <h2>Telemetry</h2>
     <div class="stats" id="stats"></div>
     <div id="warnings"></div>
@@ -197,7 +209,7 @@
     <details><summary>Raw telemetry JSON</summary><div class="body"><pre id="telemetry"></pre></div></details>
     <details><summary>Genome JSON</summary><div class="body">
       <textarea id="genome-json" spellcheck="false" aria-label="Genome JSON"></textarea>
-      <div class="row"><button id="btn-apply">Apply</button><button id="btn-link">Copy link</button></div>
+      <div class="row"><button id="btn-apply">Apply genome JSON</button></div>
     </div></details>
   </aside>
 

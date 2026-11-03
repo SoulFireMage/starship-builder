@@ -58,7 +58,7 @@ export const GENES = {
   bridge: { t: [0.45, 0.92, 0.03], size: [0.5, 1.8, 0.1], height: [0.5, 1.6, 0.08], struts: [0, 5, 1] },
 };
 
-export const LIMITS = { stations: [3, 9], wings: [0, 4], nacelles: [0, 3] };
+export const LIMITS = { stations: [3, 9], wings: [0, 8], nacelles: [0, 4] };
 
 // ---------------------------------------------------------------------------
 // Presets (hand-tuned starting points; all ordinary genomes)

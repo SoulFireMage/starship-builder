@@ -23,12 +23,13 @@ starship models that humans and agents can both play with.
   - a teardrop canopy with real boolean-cut frames, sitting over a level deck you can stand on (try **Cockpit**).
 - **Style genes:** spine bend, wing droop, rib fluting and armour terracing, all applied as warps after refinement, so they actually show.
 - **Evolution:** mutate, crossover, random, undo/redo, and a six-child nursery with a variation slider.
+- **Parts:** up to 8 wings and fins (add a wing pair, add a fin, duplicate, remove), 4 engine pods on the hull or wings, and 3–9 hull stations.
 - **Telemetry for agents:**
   - watertight status, genus and body count;
   - a ray-cast pilot sightline and deck headroom;
   - proportions;
   - a live `Manifold.slice()` deck plan.
-- **Export & 3D print** (right-hand panel, top):
+- **Export & 3D print** (its own bar: along the bottom on desktop, right under the 3D view on phones):
   - **STL for printing:** one welded, watertight body with the canopy fused in, scaled to your chosen print length in mm.
   - **ManifoldCAD script:** a self-contained `.mjs` to paste into [manifoldcad.org](https://manifoldcad.org) (or run with `npx manifold-cad ship.mjs ship.3mf`). It is the drydock's *actual* compiler source plus your genome, so you can read exactly how the ship is built and export 3MF/GLB from there.
   - Genome JSON, share links (`#g=…`) and PNG screenshots.
@@ -46,6 +47,7 @@ node tools/serve.mjs 8080     # → http://localhost:8080/
 ```bash
 npm install                   # installs manifold-3d for the Node tools only
 npm test                      # validity contract, WASM leak check, robustness over evolved genomes
+node tools/ui-test.mjs        # browser UI regression test (needs Playwright + Chromium)
 node tools/compile.mjs heron  # telemetry for a preset or a genome .json
 node tools/snapshot.mjs       # PNG renders in snapshots/ (needs Playwright + Chromium)
 node tools/manifoldcad.mjs katiya --mm 200 > katiya.mjs   # ManifoldCAD script for a preset/genome
@@ -74,5 +76,5 @@ blog. three.js and manifold-3d load from jsDelivr at pinned versions.
 | `src/viewer.js` | Three.js: plating shader, glass, engine glow, starfield, thumbnails |
 | `src/manifoldcad.js` | Builds the self-contained ManifoldCAD script from the real sources |
 | `src/app.js` | UI wiring, nursery, history, export, `window.drydock` |
-| `tools/` | `test`, `compile`, `snapshot`, `manifoldcad`, `serve` |
+| `tools/` | `test`, `ui-test`, `compile`, `snapshot`, `manifoldcad`, `serve` |
 | `demo.html`, `docs/AGENT_SPEC_v1_gemini.md` | The original v1 (Gemini) demo and plan |

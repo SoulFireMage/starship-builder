@@ -91,7 +91,7 @@ export function superRing({ y, zc, hw, top, bot, n, tumble = 0, segments = 48 })
  */
 export function airfoilRing({ le, chord, thick, up, chordDir = [0, -1, 0], samples = 18 }) {
   const yt = (x) => 5 * thick * (0.2969 * Math.sqrt(x) - 0.1260 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1015 * x ** 4);
-  const minHalf = Math.max(0.004 * chord, 0.004);
+  const minHalf = Math.max(0.004 * chord, 0.03);   // ≥ 6 cm thick everywhere: survives simplify(), friendlier to print
   const xs = [];
   for (let i = 0; i <= samples; i++) xs.push(0.5 - 0.5 * Math.cos(Math.PI * i / samples)); // cosine spacing
   const pt = (x, sgn) => {

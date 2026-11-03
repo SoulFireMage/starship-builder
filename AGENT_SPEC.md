@@ -89,15 +89,15 @@ That's enough to break through a hull skin.
     ]
   },
   "style": { "bend": -0.018, "droop": 0.28, "ribAmp": 0.0016, "ribWave": 0.045, "terrace": 0, "terraceStep": 0.02 },
-  "wings": [                                     // 0–4; dihedral ≈ 90 with mirror:false = dorsal fin
+  "wings": [                                     // 0–8; dihedral ≈ 90 with mirror:false = dorsal fin
     { "t": 0.34, "z": -0.1, "span": 0.36, "chord": 0.36, "taper": 0.22, "sweep": 38,
       "dihedral": -4, "gull": 0.08, "crescent": 0.22, "thick": 0.11, "mirror": true }
   ],
-  "nacelles": [                                  // 0–3 (each mirrored unless dorsal/ventral)
+  "nacelles": [                                  // 0–4 (each mirrored unless dorsal/ventral)
     { "mount": "wing", "wing": 0, "at": 0.62, "angle": 0, "offset": -0.012,
       "length": 0.3, "radius": 0.026, "intake": 0.75, "exhaust": 0.8 }
   ],
-  "engines": { "count": 2, "radius": 0.55 },     // stern main engines
+  "engines": { "count": 2, "radius": 0.55 },     // stern main engines; radius = fraction of the largest bell that fits (0.9 = max)
   "bridge": { "t": 0.72, "size": 1.0, "height": 1.0, "struts": 3 },
   "palette": { "primary": "#2b3f37", "secondary": "#16201c", "accent": "#7fe0c2", "glow": "#38ffd2" }
 }
@@ -106,7 +106,9 @@ That's enough to break through a hull skin.
 The ranges and mutation step sizes live in `GENES` in `src/genome.js`; that's
 the single source of truth, also used to build the UI sliders.
 Interior hull stations keep a minimum section; only the bow tip may be
-needle-thin. A wing-mounted nacelle on a missing or vertical wing is re-homed
+needle-thin. Airfoil sections are at least 6 cm thick, and the post-warp
+`simplify()` tolerance stays below that, so thin tips can't be pinched off.
+A wing root can't run past the stern face, where the nozzles would cut it up. A wing-mounted nacelle on a missing or vertical wing is re-homed
 to the hull.
 
 ### Evolution operators
@@ -157,6 +159,7 @@ The viewer disposes Three.js geometries and materials when it replaces a ship.
 ```bash
 npm install                                   # only manifold-3d, for the Node tools
 npm test                                      # contract + leak + robustness suite
+node tools/ui-test.mjs                        # browser UI regression test (needs Playwright)
 node tools/compile.mjs katiya                 # telemetry JSON for a preset or a genome file
 node tools/compile.mjs ship.json --cutaway
 node tools/snapshot.mjs katiya my.json        # PNGs in snapshots/ + telemetry (needs Playwright)
@@ -183,7 +186,16 @@ A sensible agent loop:
 
 Record intent in `meta.lineage`.
 
-## 8. Extending the compiler: checklist
+## 8. UI rule: sliders look up, never hold
+
+Every slider gets a *getter* (`() => genome.wings[sel.wing]`), never an
+object reference. `normalize()` returns a fresh copy, so a held reference
+goes stale, and edits then silently land on a detached object. That was the
+v2.0 bug where the second slider "did nothing". `tools/ui-test.mjs` guards it.
+Genes that can't act in context (rib spacing with zero rib depth, and so on)
+are shown disabled with the reason, rather than looking broken.
+
+## 9. Extending the compiler: checklist
 
 1. Add the genes, with `[min, max, sigma]`, to `GENES`, and defaults in `normalize`.
 2. Build the part from lofts or revolves in its own coordinates, **attached
@@ -193,7 +205,7 @@ Record intent in `meta.lineage`.
    measured surfaces.
 5. Add a preset that uses it, run `npm test`, and look at it (`tools/snapshot.mjs`).
 
-## 9. What changed from v1, and why
+## 10. What changed from v1, and why
 
 | v1 (Gemini plan) | v2 | Reason |
 |---|---|---|

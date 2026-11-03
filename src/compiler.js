@@ -24,7 +24,7 @@
 //   6. Scope.free()
 
 import { Scope, monotoneCubic, superRing, airfoilRing, loft, lerp, clamp, smoothstep } from './geom.js';
-import { normalize } from './genome.js';
+import { normalize, GENES } from './genome.js';
 
 const DEG = Math.PI / 180;
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -75,18 +75,20 @@ export function compileStarship(wasm, genomeIn, opts = {}) {
       const kE = g.engines.count;
       if (kE > 0) {
         const hh = Math.min(h.top, h.bot);
-        let r = g.engines.radius * hh * 0.95;
-        r = Math.min(r, (h.hw * 1.7) / kE / 2);
+        // largest bell radius that fits the stern section, then the gene picks a fraction of it
+        let r = Math.min(hh * 0.95, (h.hw * 1.7) / kE / 2);
         const inside = (x, rr) => Math.pow((Math.abs(x) + rr) / h.hw, h.n) + Math.pow(rr / hh, h.n) <= 0.92;
         const spacing = () => (kE === 1 ? 0 : Math.min(2.25 * r, (h.hw * 1.7 - 2 * r) / (kE - 1)));
         let guard = 0;
         while (guard++ < 40 && !inside(((kE - 1) / 2) * spacing(), r)) r *= 0.92;
+        r *= g.engines.radius / GENES.engines.radius[1];
         const sp = spacing();
         for (let j = 0; j < kE; j++) {
           const x = (j - (kE - 1) / 2) * sp;
           const depth = r * 1.4;
           // protruding bell (cone, wide at the exit) then hollow it out
-          const bell = k(k(k(Manifold.cylinder(r * 0.6 + 0.3, r * 1.12, r * 1.02, 40)).rotate([-90, 0, 0])).translate([x, h.y - r * 0.6, h.zc]));
+          const lip = Math.max(0.12 * r, 0.08), root = Math.max(0.4, r * 0.8);      // printable wall, deep root
+          const bell = k(k(k(Manifold.cylinder(r * 0.6 + root, r * 0.95 + lip * 1.4, r * 0.95 + lip, 40)).rotate([-90, 0, 0])).translate([x, h.y - r * 0.6, h.zc]));
           solids.push(bell);
           const throat = k(k(k(Manifold.cylinder(depth + r * 0.6 + 0.5, r * 0.95, r * 0.62, 40)).rotate([-90, 0, 0])).translate([x, h.y - r * 0.6 - 0.5, h.zc]));
           cutters.push(throat);
@@ -101,7 +103,9 @@ export function compileStarship(wasm, genomeIn, opts = {}) {
     for (const w of g.wings) {
       const h = hullAt(w.t);
       const z0 = h.zc + (w.z > 0 ? w.z * h.top : w.z * h.bot) * 0.85;
-      const span = w.span * L, c0 = w.chord * L, c1 = c0 * w.taper;
+      // the root may not run past the stern face (it would end up inside the nozzles)
+      const c0 = Math.max(0.04 * L, Math.min(w.chord * L, 2 * (h.y + halfL - 0.01 * L)));
+      const span = w.span * L, c1 = c0 * w.taper;
       const d = w.dihedral * DEG;
       const spanDir = [Math.cos(d), 0, Math.sin(d)], up = [-Math.sin(d), 0, Math.cos(d)];
       const tanSw = Math.tan(clamp(w.sweep, -60, 75) * DEG);
@@ -147,7 +151,7 @@ export function compileStarship(wasm, genomeIn, opts = {}) {
         const phi = n.angle * DEG, c = Math.cos(phi), s = Math.sin(phi);
         const surf = [h.hw * c, h.y, h.zc + (s > 0 ? h.top : h.bot) * s];
         const dir = [c, 0, s];
-        center = add3(surf, mul3(dir, R + Math.max(0, n.offset * L)));
+        center = add3(surf, mul3(dir, R + Math.max(-0.8 * R, n.offset * L)));   // negative = sunk into the hull
         anchor = [surf[0] * 0.4, h.y, h.zc + (surf[2] - h.zc) * 0.4];
         if (Math.abs(c) < 0.08) { mirror = false; center[0] = 0; anchor[0] = 0; }
       }
@@ -236,7 +240,8 @@ export function compileStarship(wasm, genomeIn, opts = {}) {
       };
       ext = k(typeof ext.warpBatch === 'function' ? ext.warpBatch(warpFn) : ext.warp((v) => { const q = W(v); v[0] = q[0]; v[1] = q[1]; v[2] = q[2]; }));
       // collapse the refinement wherever the warp left the surface flat
-      ext = k(ext.simplify(L * (opts.quality === 'draft' ? 0.0012 : 0.0004)));
+      // tolerance stays well under the thinnest feature (airfoils are ≥ 6 cm thick)
+      ext = k(ext.simplify(Math.min(0.015, L * (opts.quality === 'draft' ? 0.0012 : 0.0004))));
     }
     mark('warp', ext);
     for (const e of engineGlow) e.pos = W(e.pos);
@@ -349,7 +354,7 @@ export function compileStarship(wasm, genomeIn, opts = {}) {
     const isDebris = (p) => {
       const v = p.volume(), bb = p.boundingBox();
       const thin = Math.min(bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]);
-      return v < 1e-3 || (v < Math.max(0.02, totalVol * 2e-6) && thin < 0.3);
+      return v < 1e-3 || v < totalVol * 2e-6 || (v < Math.max(0.02, totalVol * 2e-6) && thin < 0.3);
     };
     // negative-volume components are sealed internal voids, not separate parts
     const voids = parts.filter((p) => p.volume() < -1e-3);

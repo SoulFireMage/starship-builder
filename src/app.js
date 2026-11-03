@@ -66,8 +66,13 @@ function setGenome(g, { history = true, reframe = false, rebuildUI = true } = {}
 }
 
 // ------------------------------------------------------------ sliders
+// Sliders never hold on to genome objects: each one is given a *getter* that
+// looks its target up in the current genome at event time. (Holding objects
+// went stale as soon as normalize() replaced the genome, so later edits
+// silently did nothing.)
 const nice = (v, r) => { const span = r[1] - r[0]; return span >= 20 ? v.toFixed(0) : span >= 2 ? v.toFixed(1) : span >= 0.2 ? v.toFixed(3) : v.toFixed(4); };
-function slider(parent, label, obj, key, range, { integer = false, onChange } = {}) {
+const clone = (o) => JSON.parse(JSON.stringify(o));
+function slider(parent, label, get, key, range, { integer = false, needs = null } = {}) {
   const wrap = document.createElement('div'); wrap.className = 'slider';
   const lbl = document.createElement('div'); lbl.className = 'lbl';
   const name = document.createElement('span'); name.textContent = label;
@@ -75,136 +80,174 @@ function slider(parent, label, obj, key, range, { integer = false, onChange } = 
   lbl.append(name, val);
   const inp = document.createElement('input');
   inp.type = 'range'; inp.min = range[0]; inp.max = range[1]; inp.step = integer ? 1 : (range[1] - range[0]) / 200;
-  inp.value = obj[key]; inp.setAttribute('aria-label', label);
-  const show = () => { val.textContent = integer ? String(obj[key]) : nice(+obj[key], range); };
+  inp.value = get()[key]; inp.setAttribute('aria-label', label);
+  const show = () => { const v = get()[key]; val.textContent = integer ? String(Math.round(v)) : nice(+v, range); };
   show();
+  if (needs) {            // a gene that can't act yet: grey it out and say why
+    inp.disabled = true; wrap.classList.add('inert');
+    const why = document.createElement('div'); why.className = 'why'; why.textContent = needs;
+    wrap.append(lbl, inp, why); parent.append(wrap); return inp;
+  }
+  inp.addEventListener('pointerdown', () => { past.push(clone(genome)); if (past.length > 60) past.shift(); future.length = 0; });
+  inp.addEventListener('keydown', () => { past.push(clone(genome)); if (past.length > 60) past.shift(); future.length = 0; }, { once: true });
   inp.addEventListener('input', () => {
-    obj[key] = integer ? Math.round(+inp.value) : +inp.value;
-    show(); onChange && onChange();
+    get()[key] = integer ? Math.round(+inp.value) : +inp.value;
+    show();
     $('genome-json').value = JSON.stringify(genome, null, 2);
     requestCompile('draft');
   });
-  inp.addEventListener('pointerdown', () => { past.push(JSON.parse(JSON.stringify(genome))); future.length = 0; });
-  inp.addEventListener('change', () => { genome = normalize(genome); requestCompile('final'); });
+  inp.addEventListener('change', () => { genome = normalize(genome); buildUI(); requestCompile('final'); });
   wrap.append(lbl, inp);
   parent.append(wrap);
   return inp;
 }
 
-function picker(parent, items, current, labelFn, onPick, onAdd, onRemove) {
-  const row = document.createElement('div'); row.className = 'row';
-  const s = document.createElement('select');
-  items.forEach((it, i) => { const o = document.createElement('option'); o.value = i; o.textContent = labelFn(it, i); s.append(o); });
-  s.value = current; s.onchange = () => onPick(+s.value);
-  row.append(s);
-  if (onAdd) { const b = document.createElement('button'); b.className = 'small'; b.textContent = '+'; b.title = 'Add'; b.onclick = onAdd; row.append(b); }
-  if (onRemove) { const b = document.createElement('button'); b.className = 'small'; b.textContent = '−'; b.title = 'Remove'; b.onclick = onRemove; row.append(b); }
+/** Part chooser: a select plus labelled action buttons ({label, title, run, disabled}). */
+function picker(parent, items, current, labelFn, onPick, actions) {
+  if (items.length) {
+    const s = document.createElement('select');
+    items.forEach((it, i) => { const o = document.createElement('option'); o.value = i; o.textContent = labelFn(it, i); s.append(o); });
+    s.value = current; s.onchange = () => onPick(+s.value);
+    parent.append(s);
+  } else {
+    const e = document.createElement('div'); e.className = 'why'; e.textContent = 'None yet. Add one below.'; parent.append(e);
+  }
+  const row = document.createElement('div'); row.className = 'actions';
+  for (const a of actions) {
+    const b = document.createElement('button'); b.className = 'small'; b.textContent = a.label;
+    b.title = a.disabled || a.title || ''; b.disabled = !!a.disabled; b.onclick = a.run;
+    row.append(b);
+  }
   parent.append(row);
-  return s;
 }
 
 const LABELS = {
   length: 'Length (m)', tumble: 'Tumblehome', bend: 'Spine bend', droop: 'Wing droop', ribAmp: 'Rib depth', ribWave: 'Rib spacing',
   terrace: 'Armour terracing', terraceStep: 'Terrace step', t: 'Position along hull', w: 'Beam', top: 'Dorsal height', bot: 'Ventral depth',
-  z: 'Spine height', n: 'Section squareness', span: 'Span', chord: 'Root chord', taper: 'Taper', sweep: 'Sweep°', dihedral: 'Dihedral°',
+  z: 'Root height on hull', n: 'Section squareness', span: 'Span', chord: 'Root chord', taper: 'Taper', sweep: 'Sweep°', dihedral: 'Dihedral° (90 = upright)',
   gull: 'Gull kink', crescent: 'Crescent', thick: 'Thickness', at: 'Mount position', angle: 'Angle around hull°', offset: 'Stand-off',
   radius: 'Radius', intake: 'Intake', exhaust: 'Exhaust', count: 'Main engines', size: 'Canopy size', height: 'Canopy height', struts: 'Canopy struts',
 };
 const lab = (k) => LABELS[k] || k;
+const isFin = (w) => Math.abs(w.dihedral) > 55;
+const podEligible = (w) => w && w.mirror && Math.abs(w.dihedral) <= 60;
+
+const NEW_WING = () => ({ t: 0.4, z: 0, span: 0.26, chord: 0.26, taper: 0.35, sweep: 35, dihedral: 0, gull: 0, crescent: 0.1, thick: 0.09, mirror: true });
+const NEW_FIN = () => ({ t: 0.15, z: 0.8, span: 0.1, chord: 0.16, taper: 0.4, sweep: 45, dihedral: 90, gull: 0, crescent: 0.1, thick: 0.08, mirror: false });
+
+function edit(fn) { const ng = clone(genome); fn(ng); setGenome(ng); }
 
 function buildUI() {
   // style
   const s = $('sec-style'); s.innerHTML = '';
-  slider(s, lab('length'), genome, 'length', GENES.length);
-  slider(s, lab('tumble'), genome.hull, 'tumble', GENES.hull.tumble);
-  for (const k of Object.keys(GENES.style)) slider(s, lab(k), genome.style, k, GENES.style[k]);
+  slider(s, lab('length'), () => genome, 'length', GENES.length);
+  slider(s, lab('tumble'), () => genome.hull, 'tumble', GENES.hull.tumble);
+  for (const k of Object.keys(GENES.style)) {
+    const needs = k === 'ribWave' && genome.style.ribAmp === 0 ? 'Raise rib depth to use this'
+      : k === 'terraceStep' && genome.style.terrace === 0 ? 'Raise armour terracing to use this' : null;
+    slider(s, lab(k), () => genome.style, k, GENES.style[k], { needs });
+  }
 
   // hull stations
   const h = $('sec-hull'); h.innerHTML = '';
   const sts = genome.hull.stations;
   sel.station = Math.min(sel.station, sts.length - 1);
-  picker(h, sts, sel.station, (x, i) => `Station ${i + 1}  (t=${x.t.toFixed(2)})${i === 0 ? ' stern' : i === sts.length - 1 ? ' bow' : ''}`,
-    (i) => { sel.station = i; buildUI(); },
-    sts.length < LIMITS.stations[1] ? () => {
-      const i = Math.max(1, sel.station + (sel.station === sts.length - 1 ? 0 : 1));
-      const a = sts[i - 1], b = sts[i]; const m = {}; for (const k in a) m[k] = (a[k] + b[k]) / 2;
-      const ng = JSON.parse(JSON.stringify(genome)); ng.hull.stations.splice(i, 0, m); sel.station = i; setGenome(ng);
-    } : null,
-    sts.length > LIMITS.stations[0] && sel.station > 0 && sel.station < sts.length - 1 ? () => {
-      const ng = JSON.parse(JSON.stringify(genome)); ng.hull.stations.splice(sel.station, 1); setGenome(ng);
-    } : null);
-  const cur = sts[sel.station];
+  const end = sel.station === 0 || sel.station === sts.length - 1;
+  picker(h, sts, sel.station, (x, i) => `Station ${i + 1} (t=${x.t.toFixed(2)})${i === 0 ? ' · stern' : i === sts.length - 1 ? ' · bow tip' : ''}`,
+    (i) => { sel.station = i; buildUI(); }, [
+      { label: '+ Station', title: 'Insert a station between this one and the next', disabled: sts.length >= LIMITS.stations[1] ? `At most ${LIMITS.stations[1]} stations` : null,
+        run: () => edit((ng) => {
+          const i = sel.station === sts.length - 1 ? sel.station : sel.station + 1;
+          const a = ng.hull.stations[i - 1], b = ng.hull.stations[i]; const m = {}; for (const k in a) m[k] = (a[k] + b[k]) / 2;
+          ng.hull.stations.splice(i, 0, m); sel.station = i;
+        }) },
+      { label: 'Remove', disabled: end ? 'Stern and bow stations are fixed' : sts.length <= LIMITS.stations[0] ? `At least ${LIMITS.stations[0]} stations` : null,
+        run: () => edit((ng) => { ng.hull.stations.splice(sel.station, 1); }) },
+    ]);
   for (const k of Object.keys(GENES.hull.station)) {
-    if (k === 't' && (sel.station === 0 || sel.station === sts.length - 1)) continue;
-    slider(h, lab(k), cur, k, GENES.hull.station[k]);
+    if (k === 't' && end) continue;
+    let range = GENES.hull.station[k];
+    if (k === 't') range = [sts[sel.station - 1].t + 0.04, sts[sel.station + 1].t - 0.04]; // can't overtake neighbours
+    slider(h, k === 'z' ? 'Spine height' : lab(k), () => genome.hull.stations[sel.station], k, range);
   }
 
-  // wings
+  // wings & fins
   const w = $('sec-wings'); w.innerHTML = '';
   const ws = genome.wings;
   sel.wing = Math.min(sel.wing, Math.max(0, ws.length - 1));
-  picker(w, ws, sel.wing, (x, i) => `${Math.abs(x.dihedral) > 55 ? 'Fin' : 'Wing'} ${i + 1}${x.mirror ? ' (pair)' : ''}`,
-    (i) => { sel.wing = i; buildUI(); },
-    ws.length < LIMITS.wings[1] ? () => {
-      const ng = JSON.parse(JSON.stringify(genome));
-      ng.wings.push({ t: 0.25, z: 0.6, span: 0.1, chord: 0.15, taper: 0.4, sweep: 45, dihedral: 70, gull: 0, crescent: 0.1, thick: 0.08, mirror: true });
-      sel.wing = ng.wings.length - 1; setGenome(ng);
-    } : null,
-    ws.length ? () => { const ng = JSON.parse(JSON.stringify(genome)); ng.wings.splice(sel.wing, 1); setGenome(ng); } : null);
+  const full = ws.length >= LIMITS.wings[1] ? `At most ${LIMITS.wings[1]} wings and fins` : null;
+  picker(w, ws, sel.wing, (x, i) => `${i + 1}. ${isFin(x) ? 'Fin' : 'Wing'}${x.mirror ? ' pair' : ' (single)'}`,
+    (i) => { sel.wing = i; buildUI(); }, [
+      { label: '+ Wing pair', disabled: full, run: () => edit((ng) => { ng.wings.push(NEW_WING()); sel.wing = ng.wings.length - 1; }) },
+      { label: '+ Fin', title: 'A single upright fin on the centreline', disabled: full, run: () => edit((ng) => { ng.wings.push(NEW_FIN()); sel.wing = ng.wings.length - 1; }) },
+      { label: 'Duplicate', title: 'Copy this one, shifted forward', disabled: full || (!ws.length && 'Nothing to copy'),
+        run: () => edit((ng) => { const c = clone(ng.wings[sel.wing]); c.t = Math.min(0.9, c.t + 0.12); ng.wings.splice(sel.wing + 1, 0, c); sel.wing += 1; }) },
+      { label: 'Remove', disabled: !ws.length && 'Nothing to remove',
+        run: () => edit((ng) => {
+          const i = sel.wing; ng.wings.splice(i, 1);
+          for (const n of ng.nacelles) {           // keep pods attached to the right wing
+            if (n.mount !== 'wing') continue;
+            if (n.wing === i) { n.mount = 'hull'; n.at = 0.25; } else if (n.wing > i) n.wing -= 1;
+          }
+        }) },
+    ]);
   if (ws[sel.wing]) {
-    const cw = ws[sel.wing];
     const lb = document.createElement('label'); lb.className = 'check';
-    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = cw.mirror;
-    cb.onchange = () => { const ng = JSON.parse(JSON.stringify(genome)); ng.wings[sel.wing].mirror = cb.checked; setGenome(ng); };
-    lb.append(cb, document.createTextNode('Mirrored pair'));
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = ws[sel.wing].mirror;
+    cb.onchange = () => edit((ng) => { ng.wings[sel.wing].mirror = cb.checked; });
+    lb.append(cb, document.createTextNode('Mirrored pair (untick for a single centreline fin)'));
     w.append(lb);
-    for (const k of Object.keys(GENES.wing)) slider(w, lab(k), cw, k, GENES.wing[k]);
+    for (const k of Object.keys(GENES.wing)) slider(w, lab(k), () => genome.wings[sel.wing], k, GENES.wing[k]);
   }
 
   // nacelles
   const n = $('sec-nacelles'); n.innerHTML = '';
   const ns = genome.nacelles;
   sel.nacelle = Math.min(sel.nacelle, Math.max(0, ns.length - 1));
-  picker(n, ns, sel.nacelle, (x, i) => `Nacelle ${i + 1} on ${x.mount === 'wing' ? 'wing ' + (x.wing + 1) : 'hull'}`,
-    (i) => { sel.nacelle = i; buildUI(); },
-    ns.length < LIMITS.nacelles[1] ? () => {
-      const ng = JSON.parse(JSON.stringify(genome));
-      ng.nacelles.push({ mount: 'hull', wing: 0, at: 0.2, angle: 0, offset: 0.01, length: 0.28, radius: 0.03, intake: 0.8, exhaust: 0.85 });
-      sel.nacelle = ng.nacelles.length - 1; setGenome(ng);
-    } : null,
-    ns.length ? () => { const ng = JSON.parse(JSON.stringify(genome)); ng.nacelles.splice(sel.nacelle, 1); setGenome(ng); } : null);
+  const nfull = ns.length >= LIMITS.nacelles[1] ? `At most ${LIMITS.nacelles[1]} nacelles` : null;
+  const firstWing = genome.wings.findIndex(podEligible);
+  picker(n, ns, sel.nacelle, (x, i) => `${i + 1}. Pod on ${x.mount === 'wing' ? 'wing ' + (x.wing + 1) : 'hull'}`,
+    (i) => { sel.nacelle = i; buildUI(); }, [
+      { label: '+ Hull pod', disabled: nfull, run: () => edit((ng) => { ng.nacelles.push({ mount: 'hull', wing: 0, at: 0.2, angle: 0, offset: 0.01, length: 0.28, radius: 0.03, intake: 0.8, exhaust: 0.85 }); sel.nacelle = ng.nacelles.length - 1; }) },
+      { label: '+ Wing pod', disabled: nfull || (firstWing < 0 && 'Needs a mirrored, non-upright wing'),
+        run: () => edit((ng) => { ng.nacelles.push({ mount: 'wing', wing: firstWing, at: 0.6, angle: 0, offset: -0.012, length: 0.28, radius: 0.026, intake: 0.8, exhaust: 0.85 }); sel.nacelle = ng.nacelles.length - 1; }) },
+      { label: 'Duplicate', disabled: nfull || (!ns.length && 'Nothing to copy'),
+        run: () => edit((ng) => { const c = clone(ng.nacelles[sel.nacelle]); c.at = Math.min(1, c.at + 0.15); ng.nacelles.splice(sel.nacelle + 1, 0, c); sel.nacelle += 1; }) },
+      { label: 'Remove', disabled: !ns.length && 'Nothing to remove', run: () => edit((ng) => { ng.nacelles.splice(sel.nacelle, 1); }) },
+    ]);
   if (ns[sel.nacelle]) {
     const cn = ns[sel.nacelle];
     const ms = document.createElement('select');
-    const opts = [['hull', 'Mounted on hull'], ...genome.wings.map((x, i) => [`wing:${i}`, `Mounted on wing ${i + 1}`])];
+    const opts = [['hull', 'Mounted on hull'], ...genome.wings.map((x, i) => (podEligible(x) ? [`wing:${i}`, `Mounted on wing ${i + 1}`] : null)).filter(Boolean)];
     for (const [v, t] of opts) { const o = document.createElement('option'); o.value = v; o.textContent = t; ms.append(o); }
     ms.value = cn.mount === 'wing' ? `wing:${cn.wing}` : 'hull';
-    ms.onchange = () => {
-      const ng = JSON.parse(JSON.stringify(genome)); const t = ng.nacelles[sel.nacelle];
+    ms.onchange = () => edit((ng) => {
+      const t = ng.nacelles[sel.nacelle];
       if (ms.value === 'hull') t.mount = 'hull'; else { t.mount = 'wing'; t.wing = +ms.value.split(':')[1]; }
-      setGenome(ng);
-    };
+    });
     n.append(ms);
     for (const k of Object.keys(GENES.nacelle)) {
       if (k === 'angle' && cn.mount === 'wing') continue;
-      slider(n, lab(k), cn, k, GENES.nacelle[k]);
+      const label = k === 'at' ? (cn.mount === 'wing' ? 'Position along span' : 'Position along hull') : lab(k);
+      slider(n, label, () => genome.nacelles[sel.nacelle], k, GENES.nacelle[k]);
     }
   }
 
   // engines & bridge
   const b = $('sec-bridge'); b.innerHTML = '';
-  slider(b, lab('count'), genome.engines, 'count', GENES.engines.count, { integer: true });
-  slider(b, 'Engine size', genome.engines, 'radius', GENES.engines.radius);
-  slider(b, 'Bridge position', genome.bridge, 't', GENES.bridge.t);
-  slider(b, lab('size'), genome.bridge, 'size', GENES.bridge.size);
-  slider(b, lab('height'), genome.bridge, 'height', GENES.bridge.height);
-  slider(b, lab('struts'), genome.bridge, 'struts', GENES.bridge.struts, { integer: true });
+  slider(b, lab('count'), () => genome.engines, 'count', GENES.engines.count, { integer: true });
+  slider(b, 'Engine size (of what fits the stern)', () => genome.engines, 'radius', GENES.engines.radius, { needs: genome.engines.count === 0 ? 'Add a main engine first' : null });
+  slider(b, 'Bridge position', () => genome.bridge, 't', GENES.bridge.t);
+  slider(b, lab('size'), () => genome.bridge, 'size', GENES.bridge.size);
+  slider(b, lab('height'), () => genome.bridge, 'height', GENES.bridge.height);
+  slider(b, lab('struts'), () => genome.bridge, 'struts', GENES.bridge.struts, { integer: true });
 
   // palette
   const p = $('sec-palette'); p.innerHTML = '';
   for (const k of ['primary', 'secondary', 'accent', 'glow']) {
     const l = document.createElement('label'); l.textContent = k;
     const c = document.createElement('input'); c.type = 'color'; c.value = genome.palette[k];
+    c.addEventListener('pointerdown', () => { past.push(clone(genome)); future.length = 0; });
     c.oninput = () => { genome.palette[k] = c.value; if (lastResult) { lastResult.genome.palette = { ...genome.palette }; view.show(lastResult); } };
     c.onchange = () => { $('genome-json').value = JSON.stringify(genome, null, 2); syncUrl(); };
     l.append(c); p.append(l);
